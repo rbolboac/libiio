@@ -10,7 +10,7 @@
 
 /*
  * noos_iiod_run() for a build whose platform glue names its console UART in
- * parameters.h (UART_DEVICE_ID/BAUDRATE/OPS/EXTRA), as platform/<platform>/
+ * parameters.h (UART_DEVICE_ID/BAUDRATE/OPS/EXTRA), as samples/iiod/platform/<platform>/
  * here does. A no-OS project that already has a no_os_uart_init_param calls
  * noos_iiod_run_uart() with it instead, and needs no parameters.h.
  */

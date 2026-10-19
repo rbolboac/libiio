@@ -49,13 +49,13 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/no_os_locate.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/no_os_board.cmake)
 
-set(IIOD_PLATFORM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/platform/${PLATFORM})
+set(IIOD_PLATFORM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/samples/iiod/platform/${PLATFORM})
 if(NOT EXISTS ${IIOD_PLATFORM_DIR}/parameters.h)
   message(FATAL_ERROR
-    "${BOARD} is a PLATFORM=${PLATFORM} board, which has no iiod glue yet: add "
-    "platform/${PLATFORM}/ with parameters.h and timers.h (UART, trigger timer "
-    "and IRQ wiring, see platform/maxim/). no-OS itself supports the platform; "
-    "the port does not.")
+    "${BOARD} is a PLATFORM=${PLATFORM} board, which has no iiod glue yet: "
+    "add samples/iiod/platform/${PLATFORM}/ with parameters.h and timers.h "
+    "(UART, trigger timer and IRQ wiring, see samples/iiod/platform/maxim/). "
+    "no-OS itself supports the platform; the port does not.")
 endif()
 
 # The toolchain is read by project(), before no-OS is added below, so point

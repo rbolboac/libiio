@@ -126,7 +126,7 @@ int noos_iiod_run_uart(const struct no_os_uart_init_param *uart_ip);
 /*
  * Board bring-up that must come before any driver, such as clocks and pin
  * mux. A platform that needs one defines it in its glue under
- * platform/; the sample's weak default does nothing.
+ * samples/iiod/platform/; the sample's weak default does nothing.
  */
 int noos_platform_init(void);
 

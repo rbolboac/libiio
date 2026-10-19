@@ -379,7 +379,7 @@ there is no `iio_desc` to hand them. What is reused is the pattern — a
 `no_os_timer` + `no_os_irq` callback, as in the ad7091r8-sdz
 `iio_timer_trigger_example` — through the same no-OS HAL APIs.
 
-Board wiring lives in `platform/<platform>/timers.h`, included by `parameters.h`
+Board wiring lives in `samples/iiod/platform/<platform>/timers.h`, included by `parameters.h`
 and by the trigger backend alone (so the driver does not pull in the static UART
 and network init structs):
 
@@ -685,7 +685,7 @@ Checked on Maxim, all built:
 | max78000fthr | max78000 | x | | |
 
 USB needs the USB-HS core (no-OS has a `maxim_usb_uart.c` for the part);
-`platform/maxim/platform.cmake` refuses it on the others with that reason.
+`samples/iiod/platform/maxim/platform.cmake` refuses it on the others with that reason.
 Network assumes the ADIN1110 wiring of the AD-APARD32690-SL. Only that board
 has been run on hardware.
 
@@ -712,7 +712,7 @@ the choice is cached as `NO_OS_PATH`.
 - The Kconfig input is the board defconfig from no-OS, then the project fragment.
   The fragment is `configs/<transport>.conf` (generic: UART, IRQ, GPIO, TIMER,
   DMA, plus SPI/NET/LWIP/ADIN1110/static IP for network) followed by
-  `platform/<PLATFORM>/configs/<transport>.conf` (e.g. `CONFIG_USB_UART_MAXIM`).
+  `samples/iiod/platform/<PLATFORM>/configs/<transport>.conf` (e.g. `CONFIG_USB_UART_MAXIM`).
   They are merged into `build-*/iiod/<transport>.conf` and passed as
   `PROJECT_DEFCONFIG`, relative to this directory as no-OS expects.
   `boards/<transport>/<BOARD>.conf`, if one is added, overrides per board.
@@ -725,7 +725,7 @@ the choice is cached as `NO_OS_PATH`.
   per-platform layout: it includes `cmake/<platform>/<platform>_platform_sdk.cmake`
   (aducm3029, pico, stm32, xilinx) and calls its `config_<platform>_sdk()`.
   Maxim has none, because its SDK is set up by the toolchain file.
-- `platform/<PLATFORM>/platform.cmake` adds only what no-OS's target lists leave
+- `samples/iiod/platform/<PLATFORM>/platform.cmake` adds only what no-OS's target lists leave
   out (for maxim: the MSDK ADC sources on max32690, which no-OS does not compile
   there; added only if not already in `no-os`'s `SOURCES`, so no duplicate
   symbols) and sets `IIOD_PLATFORM_ADC`: `common_api` on max32690/max32655,
@@ -746,10 +746,15 @@ Key variables:
 
 ### Other platforms
 
+The per-platform glue is the sample firmware's board wiring, like a no-OS
+project's `src/platform/<platform>/` and `pinmux_config.c`, so it lives under
+`samples/iiod/platform/`. The no-OS module (`module.cmake`) uses none of it:
+`iio_app` gives the server its UART at run time.
+
 The build is not Maxim-only: the board picks the no-OS platform. A platform
-without `platform/<PLATFORM>/parameters.h` fails at configure time with a message
+without `samples/iiod/platform/<PLATFORM>/parameters.h` fails at configure time with a message
 that the iiod glue is missing (UART id, trigger timer, IRQ controller: see
-`platform/maxim/`). Adding one takes that glue and nothing else: the board already
+`samples/iiod/platform/maxim/`). Adding one takes that glue and nothing else: the board already
 resolves (`-DBOARD=nucleo-f756zg` gets `PLATFORM=stm32` from no-OS and stops
 only at the missing glue). The no-OS side and its SDK install are unchanged.
 
@@ -776,7 +781,7 @@ Gotchas:
 
 - the MSDK startup file sizes the main stack from `__STACK_SIZE`, default
   4 KiB, which the responder overflows as soon as a buffer is enabled.
-  `platform/maxim/platform.cmake` defines it on the `no-os` target (where the
+  `samples/iiod/platform/maxim/platform.cmake` defines it on the `no-os` target (where the
   startup file is compiled) from `IIOD_STACK_SIZE`, default 64 KiB — as no-OS
   does itself for aducm3029.
 - no-OS's Maxim include path uses the MSDK's old CMSIS 4 `core_cm4.h`, which has
