@@ -748,6 +748,10 @@ that the iiod glue is missing (UART id, trigger timer, IRQ controller: see
 resolves (`-DBOARD=nucleo-f756zg` gets `PLATFORM=stm32` from no-OS and stops
 only at the missing glue). The no-OS side and its SDK install are unchanged.
 
+A platform that needs board bring-up before any driver (clocks, pin mux)
+defines `noos_platform_init()` in its glue. The sample's `main` calls it first,
+and its weak default does nothing.
+
 Without `BOARD` the directory is a host project that builds only the PC-side
 API tests (`tests/`).
 

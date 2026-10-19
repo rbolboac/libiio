@@ -414,9 +414,18 @@ static int noos_register_devices(void)
 	return noos_iio_register_device(&info);
 }
 
+__attribute__((weak)) int noos_platform_init(void)
+{
+	return 0;
+}
+
 int main(void)
 {
 	int ret;
+
+	ret = noos_platform_init();
+	if (ret)
+		return ret;
 
 	snake_reset();
 
