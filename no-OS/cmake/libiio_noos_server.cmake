@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 #
 # The iiod server half of the port, as an OBJECT library that any CMake build
-# with a `no-os` target can link, such as this directory's own firmware
-# build.
+# with a `no-os` target can link: this directory's own firmware build, or a
+# no-OS project, through module.cmake.
 #
 #   libiio_noos_add_server(<name>
 #     TRANSPORT uart|usb|network

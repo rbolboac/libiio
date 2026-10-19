@@ -841,6 +841,60 @@ Gotchas:
   priority. Also, `no_os_irq_ctrl_remove` frees the callbacks of **every**
   peripheral, so never call it on the shared controller.
 
+### libiio as a no-OS module
+
+A no-OS project can serve its devices with libiio's IIOD, for libiio v1
+clients, by enabling libiio as a no-OS library module. no-OS's own IIO server
+(`iio/`, `CONFIG_IIO`, `iio_app`) is then not used. Devices are described with
+this port's device API (`struct noos_iio_device_info`, `include/iio_device.h`),
+in no-OS drivers or in the project.
+
+```
+export NO_OS_DEP_LIBIIO_PATH=<this libiio checkout>
+cd <no-OS>
+python tools/scripts/no_os_build.py build --project eval-adxl355-pmdz \
+       --variant iio --board eval-adicup3029
+```
+
+The pieces:
+
+- **hook in no-OS:** `cmake/libraries/libiio.cmake`, included by no-OS's
+  `libraries/` when `CONFIG_LIBIIO` is set. It finds this tree like any no-OS
+  library (the `NO_OS_DEP_LIBIIO_PATH` override, else a clone of
+  `CONFIG_LIBIIO_VERSION`) and includes `module.cmake`.
+- **Kconfig:** `CONFIG_LIBIIO` and `CONFIG_LIBIIO_VERSION` live in no-OS's
+  `libraries/Kconfig`. no-OS runs Kconfig before CMake fetches any library, so the
+  switch has to be in its own tree, as lwip's and mqtt's are.
+- **`module.cmake`:**
+  - builds `libiio_noos_add_server(libiio-iiod TRANSPORT uart)` (the libiio
+    core, tinyiiod, the responder, `backend.c`, `iiod/uart.c`);
+  - links it into `${NO_OS_PROJECT_NAME}`. It's included from `libraries/`,
+    after `projects/`, so the executable already exists;
+  - puts the device API (`include/`, libiio's `include/`, `LIBIIO_STATIC`) on
+    the `no-os` target, so no-OS drivers written against it build there.
+- **registration:** at run time, `noos_iio_register_device()`, because drivers
+  allocate their state; then `noos_iiod_run_uart()` with the project's own
+  `no_os_uart_init_param`. The server needs no `parameters.h`.
+
+The first driver is no-OS's `drivers/accel/adxl355/iio_adxl355.c`
+(`CONFIG_ACCEL_IIO_ADXL355`, which depends on `CONFIG_LIBIIO`):
+
+- `adxl355_iio_init()` brings the part up in measurement mode, and
+  `adxl355_iio_get_device_info()` fills the `noos_iio_device_info`;
+- it has the attributes of no-OS's earlier IIO driver;
+- buffered scans are paced by the part's `DATA_RDY`;
+- eval-adxl355-pmdz's `iio_example.c` registers it and runs the server, for
+  the `iio`, `iio_adxl357` and `iio_adxl359` variants.
+
+The project's trigger and LWIP examples need no-OS's own server; configuring
+them stops with an error that says so. `iio_adxl355_trig.c` is kept in the tree
+but not built. Keep `CONFIG_IIO` off, because its `iio/iiod.c` also defines
+`iiod_init`, and print nothing on the IIOD UART.
+
+On the ADuCM3029 the eval-adxl355-pmdz image is about 99 KB of flash and
+6.4 KiB of `.data` + `.bss`, with no-OS's 8 KiB stack and 32 KiB heap. The
+client sets the block size, so keep `iio_rwdev -b` small.
+
 ## 14. Relationship to the Zephyr port
 
 > **Grep `~/RaluZephyr/zephyr/`, not `~/libiio/zephyr/`.**
