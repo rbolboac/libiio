@@ -331,7 +331,13 @@ Mechanics. `iio_trigger_timer.c` holds the platform-independent part: ticks,
 wait, attribute. The hardware tick sits behind `iio_trigger_timer_hw.h`
 (`_hw_init`, `_hw_start(freq_hz, tick)`, `_hw_stop`).
 `drivers/iio_trigger_timer_no_os.c` implements it with no-OS's timer and IRQ
-API and the `TRIGGER_*` wiring of `timers.h`, on every platform.
+API and the `TRIGGER_*` wiring of `timers.h`, on every platform. Three
+optional `timers.h` defines cover a no-OS layer that differs from Maxim's
+(the aducm3029 one, §13):
+- `TRIGGER_IRQ_HANDLE_TIMER`: the callback handle is the timer descriptor;
+- `TRIGGER_IRQ_PRIORITY_ID`: the id `no_os_irq_set_priority()` takes;
+- `TRIGGER_TIMER_MAX_TICKS`: a rate whose period does not fit the counter is
+  refused rather than truncated.
 
 - `iio_trigger_timer_init` — called from `iio_adc_init` — runs `_hw_init`
   (no-OS: sets up the IRQ controller and fills in the `NO_OS_EVT_TIM_ELAPSED`
@@ -670,7 +676,7 @@ CMake keeps the first configure's compiler and toolchain flags. So a dir that wa
 configured for one board refuses another, with the `--fresh` command to use,
 instead of building the new board with the old one's flags.
 
-Checked on Maxim, all built:
+Checked, all built:
 
 | board | part | uart | usb | network |
 |---|---|---|---|---|
@@ -683,10 +689,12 @@ Checked on Maxim, all built:
 | max32660fthr | max32660 | x | | |
 | max32670evkit | max32670 | x | | |
 | max78000fthr | max78000 | x | | |
+| eval-adicup3029 | ADuCM3029 | x | | |
 
 USB needs the USB-HS core (no-OS has a `maxim_usb_uart.c` for the part);
 `samples/iiod/platform/maxim/platform.cmake` refuses it on the others with that reason.
-Network assumes the ADIN1110 wiring of the AD-APARD32690-SL. Only that board
+Network assumes the ADIN1110 wiring of the AD-APARD32690-SL.
+`samples/iiod/platform/aducm3029/platform.cmake` allows only uart. Only the AD-APARD32690-SL
 has been run on hardware.
 
 ### Finding no-OS: `cmake/no_os_locate.cmake`
@@ -763,6 +771,36 @@ only at the missing glue). The no-OS side and its SDK install are unchanged.
 A platform that needs board bring-up before any driver (clocks, pin mux)
 defines `noos_platform_init()` in its glue. The sample's `main` calls it first,
 and its weak default does nothing.
+
+`samples/iiod/platform/aducm3029/` (EVAL-ADICUP3029) is the second one:
+
+```
+export CCES_HOME=/opt/analog/cces/3.0.3
+cmake --preset uart -B build-uart-adicup3029 -DBOARD=eval-adicup3029
+cmake --build build-uart-adicup3029 [--target flash]
+```
+
+- `noos_platform_init()` (`platform.c`) runs no-OS's `platform_init()`: power,
+  HCLK/PCLK at 26 MHz (the UART baud table needs it) and the pin mux. Maxim
+  needs none.
+- the pin mux is `pinmux_config.c` (UART0 only), passed to CCES through
+  `CONFIG_ADUCM_PINMUX_PATH` in `configs/uart.conf`. no-OS resolves a relative
+  path against `projects/<name>/`, so the fragment gets the absolute path by
+  `@IIOD_PLATFORM_DIR@` substitution.
+- the trigger tick is no-OS timer id 1 (GP1; no-OS keeps GP0 for delays) on
+  PCLK / 64 = 406250 Hz, through the generic `iio_trigger_timer_no_os.c`.
+  `sampling_frequency` runs from about 6.2 Hz, the 16-bit counter's limit, up
+  to 100 kHz. On this platform the callback handle is the timer descriptor,
+  and the priority goes to `TMR1_EVT_IRQn`. This needs no-OS with "drivers:
+  platform: aducm3029: fix timer and IRQ callback handling". Before that fix,
+  the unregister passed the timer to `adi_uart_RegisterCallback`, and a timer
+  initialized again after its first register never called back, so the
+  trigger stopped after the first buffer.
+- the ADC is `adc_demo` (`adc-demo`, no hardware).
+- `WITH_IIOD_V0_COMPAT` defaults to OFF. The v0 flex scanner allocates a
+  16 KiB buffer per session, half the 32 KiB heap, and `exit()`s when it can't.
+- the image is about 124 KB of flash (165 KB with v0), and `.data` + `.bss`
+  is about 6.5 KiB. no-OS's 8 KiB stack and 32 KiB heap (DSRAM_B) are kept.
 
 Without `BOARD` the directory is a host project that builds only the PC-side
 API tests (`tests/`).

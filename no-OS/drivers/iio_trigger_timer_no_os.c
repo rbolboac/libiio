@@ -14,8 +14,18 @@
 /*
  * The trigger tick through no-OS's timer and IRQ API: a TRIGGER_TIMER_ID
  * timer at TRIGGER_TIMER_FREQ_HZ, whose elapsed callback is registered on a
- * TRIGGER_IRQ_OPS controller (timers.h).
+ * TRIGGER_IRQ_OPS controller (timers.h). Optional, for platforms whose no-OS
+ * layer differs from Maxim's:
+ * - TRIGGER_IRQ_HANDLE_TIMER: the callback handle is the timer descriptor
+ *   (aducm3029), not the fixed TRIGGER_IRQ_HANDLE;
+ * - TRIGGER_IRQ_PRIORITY_ID: the id no_os_irq_set_priority() takes, when it
+ *   is not TRIGGER_IRQ_ID (aducm3029: an NVIC line, not a no-OS irq id);
+ * - TRIGGER_TIMER_MAX_TICKS: the largest period the counter holds.
  */
+
+#ifndef TRIGGER_IRQ_PRIORITY_ID
+#define TRIGGER_IRQ_PRIORITY_ID	TRIGGER_IRQ_ID
+#endif
 
 struct trigger_timer_hw {
 	struct no_os_timer_desc *timer;
@@ -78,10 +88,12 @@ int iio_trigger_timer_hw_init(void)
 		.ctx = NULL,
 		.event = NO_OS_EVT_TIM_ELAPSED,
 		.peripheral = NO_OS_TIM_IRQ,
+#ifndef TRIGGER_IRQ_HANDLE_TIMER
 		.handle = TRIGGER_IRQ_HANDLE,
+#endif
 	};
 
-	ret = no_os_irq_set_priority(hw.irq, TRIGGER_IRQ_ID,
+	ret = no_os_irq_set_priority(hw.irq, TRIGGER_IRQ_PRIORITY_ID,
 				     TRIGGER_IRQ_PRIORITY);
 	if (ret)
 		/* The controller is shared with the other drivers: keep it. */
@@ -104,11 +116,20 @@ int iio_trigger_timer_hw_start(uint32_t freq_hz, void (*tick)(void))
 	if (!hw.irq)
 		return -ENODEV;
 
+#ifdef TRIGGER_TIMER_MAX_TICKS
+	if (timer_ip.ticks_count > TRIGGER_TIMER_MAX_TICKS)
+		return -EINVAL;
+#endif
+
 	hw.tick = tick;
 
 	ret = no_os_timer_init(&hw.timer, &timer_ip);
 	if (ret)
 		return ret;
+
+#ifdef TRIGGER_IRQ_HANDLE_TIMER
+	hw.cb.handle = hw.timer;
+#endif
 
 	/*
 	 * The callback is registered only now, as iiod/usb.c does for its tick:
