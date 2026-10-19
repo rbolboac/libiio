@@ -12,7 +12,6 @@
 #include <no_os_delay.h>
 #include <no_os_util.h>
 #include <tinyiiod/tinyiiod.h>
-#include "parameters.h"
 #include "iio_device.h"
 
 /* Size of a binary iiod_command header */
@@ -149,22 +148,16 @@ int iiod_uart_run(struct no_os_uart_desc *uart_desc)
 	return ret;
 }
 
-int noos_iiod_run(void)
+int noos_iiod_run_uart(const struct no_os_uart_init_param *uart_ip)
 {
 	struct no_os_uart_desc *uart_desc;
-	struct no_os_uart_init_param uart_ip = {
-		.device_id = UART_DEVICE_ID,
-		.baud_rate = UART_BAUDRATE,
-		.size = NO_OS_UART_CS_8,
-		.parity = NO_OS_UART_PAR_NO,
-		.stop = NO_OS_UART_STOP_1_BIT,
-		.asynchronous_rx = true,
-		.platform_ops = UART_OPS,
-		.extra = UART_EXTRA,
-	};
 	int ret;
 
-	ret = no_os_uart_init(&uart_desc, &uart_ip);
+	if (!uart_ip)
+		return -EINVAL;
+
+	/* Any rx mode works: the read retries -EAGAIN until it has it all. */
+	ret = no_os_uart_init(&uart_desc, uart_ip);
 	if (ret)
 		return ret;
 

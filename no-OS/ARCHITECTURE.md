@@ -570,7 +570,10 @@ Transport specifics:
 
 - **UART** (`iiod/uart.c`) — the read loops over `no_os_uart_read`, retrying on
   `-EAGAIN`. The interpreter never returns while the UART exists, so there is
-  no session boundary.
+  no session boundary. `noos_iiod_run_uart()` takes the UART as the caller's
+  `no_os_uart_init_param`. `noos_iiod_run()` builds that from `UART_*` in the
+  platform's `parameters.h` (`iiod/uart_params.c`, built when the server is
+  given the platform's include dir).
 - **Network** (`iiod/network.c`) — lwIP plus a netdev chip
   (ADIN1110 via no-OS Kconfig, `configs/network.conf`), static IP by default,
   port 30431. **One client at a time**: the accept loop steps lwIP until a

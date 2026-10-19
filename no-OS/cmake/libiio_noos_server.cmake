@@ -10,7 +10,9 @@
 #     [V0_COMPAT]          serve libiio v0.x clients; the caller adds the
 #                          generated parser/lexer and ascii-ops.c to SOURCES
 #     [SOURCES ...]        more files built with the server's settings
-#     [INCLUDES ...]       dirs holding the platform's parameters.h / timers.h
+#     [INCLUDES ...]       dirs holding the platform's parameters.h / timers.h;
+#                          with uart, giving them also builds noos_iiod_run()
+#                          (iiod/uart_params.c), else only noos_iiod_run_uart()
 #     [DEFINITIONS ...])   extra defines, also seen by whoever links <name>
 #
 # Link <name> into the executable. It brings the objects, the libiio defines
@@ -62,6 +64,12 @@ function(libiio_noos_add_server name)
     set(_v0 0)
     # Only the stub of what ascii-ops.c would provide.
     list(APPEND arg_SOURCES ${LIBIIO_DIR}/tinyiiod/ops-stubs.c)
+  endif()
+
+  # noos_iiod_run() reads the UART from parameters.h; without the dir that
+  # has it, callers pass theirs to noos_iiod_run_uart().
+  if(arg_TRANSPORT STREQUAL "uart" AND arg_INCLUDES)
+    list(APPEND arg_SOURCES ${LIBIIO_NOOS_DIR}/iiod/uart_params.c)
   endif()
 
   add_library(${name} OBJECT

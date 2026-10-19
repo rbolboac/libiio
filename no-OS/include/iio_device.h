@@ -106,9 +106,22 @@ int noos_iio_register_device(const struct noos_iio_device_info *info);
  * noos_iiod_run() - bring up and run the IIOD server for the built transport
  *
  * Implemented by each transport; only the one selected at build time is
- * compiled. Returns a negative error code on setup failure.
+ * compiled. The uart one takes its UART from parameters.h (uart_params.c).
+ * Returns a negative error code on setup failure.
  */
 int noos_iiod_run(void);
+
+struct no_os_uart_init_param;
+
+/**
+ * noos_iiod_run_uart() - run the IIOD server on the given UART
+ * @uart_ip: the UART, initialized here as given
+ *
+ * The uart transport's entry point for callers that already have the
+ * parameters, such as a no-OS project. Returns a negative error code on
+ * setup failure.
+ */
+int noos_iiod_run_uart(const struct no_os_uart_init_param *uart_ip);
 
 /* Chip-independent network configuration supplied by the platform. */
 struct noos_net_config {
