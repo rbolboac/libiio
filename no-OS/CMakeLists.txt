@@ -102,34 +102,14 @@ include(project_utils)
 
 include(${IIOD_PLATFORM_DIR}/platform.cmake OPTIONAL)
 
-# ---------- libiio core ----------
-set(LIBIIO_SRCS
-  ${LIBIIO_DIR}/context.c
-  ${LIBIIO_DIR}/library.c
-  ${LIBIIO_DIR}/backend.c
-  ${LIBIIO_DIR}/device.c
-  ${LIBIIO_DIR}/channel.c
-  ${LIBIIO_DIR}/attr.c
-  ${LIBIIO_DIR}/utilities.c
-  ${LIBIIO_DIR}/lock-dummy.c
-  ${LIBIIO_DIR}/scan.c
-  ${LIBIIO_DIR}/buffer.c
-  ${LIBIIO_DIR}/stream.c
-  ${LIBIIO_DIR}/task.c
-  ${LIBIIO_DIR}/mask.c
-  ${LIBIIO_DIR}/sort.c
-  ${LIBIIO_DIR}/block.c
-  ${LIBIIO_DIR}/events.c
-  ${LIBIIO_DIR}/tinyiiod/tinyiiod.c
-  ${LIBIIO_DIR}/iiod/responder.c
-  ${LIBIIO_DIR}/iiod-responder.c
-  ${LIBIIO_DIR}/iiod/rw.c
-)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/libiio_noos_server.cmake)
 
 # ---------- v0 (ASCII) protocol, so libiio v0.x clients can connect ----------
 option(WITH_IIOD_V0_COMPAT "Serve libiio v0.x clients (ASCII protocol)" ON)
+set(IIOD_SERVER_SRCS "")
+set(IIOD_SERVER_INCLUDES ${IIOD_PLATFORM_DIR})
 if(WITH_IIOD_V0_COMPAT)
-  set(V0_COMPAT_ON 1)
+  set(V0_COMPAT_ARG V0_COMPAT)
   find_program(BISON_EXECUTABLE bison REQUIRED)
   find_program(FLEX_EXECUTABLE flex REQUIRED)
 
@@ -164,12 +144,26 @@ if(WITH_IIOD_V0_COMPAT)
   set_source_files_properties(${V0_COMPAT_SRCS}
     PROPERTIES COMPILE_OPTIONS "-Wno-sign-compare"
                INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/include/compat)
-  list(APPEND LIBIIO_SRCS ${V0_COMPAT_SRCS})
-else()
-  set(V0_COMPAT_ON 0)
-  # Only the stub of what ascii-ops.c would provide.
-  list(APPEND LIBIIO_SRCS ${LIBIIO_DIR}/tinyiiod/ops-stubs.c)
+  list(APPEND IIOD_SERVER_SRCS ${V0_COMPAT_SRCS})
+  list(APPEND IIOD_SERVER_INCLUDES ${V0_GEN_DIR})
 endif()
+
+if(IIOD_TRANSPORT STREQUAL "usb")
+  string(TOUPPER ${BOARD} _board_upper)
+  list(APPEND IIOD_PLATFORM_DEFS
+    NO_OS_USB_TRANSPORT
+    NO_OS_USB_PRODUCT="${_board_upper} IIO"
+  )
+endif()
+
+# ---------- the iiod server: libiio core, responder, backend, transport ----------
+libiio_noos_add_server(libiio-noos-server
+  TRANSPORT ${IIOD_TRANSPORT}
+  ${V0_COMPAT_ARG}
+  SOURCES ${IIOD_SERVER_SRCS}
+  INCLUDES ${IIOD_SERVER_INCLUDES}
+  DEFINITIONS ${IIOD_PLATFORM_DEFS}
+)
 
 # ---------- ADC HAL: the platform's own, else the hardware-free demo ----------
 if(NOT IIOD_PLATFORM_ADC)
@@ -181,9 +175,6 @@ if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/drivers/adc/${ADC}/${ADC}.c)
 endif()
 
 add_executable(libiio-noos
-  ${LIBIIO_SRCS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/backend.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/iiod/${IIOD_TRANSPORT}.c
   ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_adc.c
   ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_trigger_timer.c
   ${CMAKE_CURRENT_SOURCE_DIR}/drivers/adc/${ADC}/${ADC}.c
@@ -192,57 +183,12 @@ add_executable(libiio-noos
 )
 
 target_include_directories(libiio-noos PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_SOURCE_DIR}/drivers
-  ${CMAKE_CURRENT_SOURCE_DIR}/iiod
   ${IIOD_PLATFORM_DIR}
-  ${LIBIIO_DIR}/include
-  ${LIBIIO_DIR}
-  ${LIBIIO_DIR}/iiod
-  ${V0_GEN_DIR}
   ${IIOD_PLATFORM_INCLUDES}
 )
 
-target_compile_definitions(libiio-noos PRIVATE
-  LIBIIO_STATIC=1
-  NO_THREADS=1
-  WITH_ZSTD=0
-  WITH_LIBTINYIIOD=1
-  WITH_EXTERNAL_BACKEND=1
-  WITH_IIOD_USB_DMABUF=0
-  WITH_IIOD_V0_COMPAT=${V0_COMPAT_ON}
-  WITH_LOCAL_BACKEND=0
-  WITH_NETWORK_BACKEND=0
-  WITH_SERIAL_BACKEND=0
-  WITH_USB_BACKEND=0
-  WITH_XML_BACKEND=0
-  WITH_NETWORK_BACKEND_DYNAMIC=0
-  WITH_SERIAL_BACKEND_DYNAMIC=0
-  WITH_USB_BACKEND_DYNAMIC=0
-  HAVE_DNS_SD=0
-  WITH_EMU_BACKEND=0
-  WITH_EMU_BACKEND_DYNAMIC=0
-  WITH_MODULES=0
-  DEFAULT_LOG_LEVEL=0
-  LIBIIO_VERSION_MAJOR=1
-  LIBIIO_VERSION_MINOR=0
-  LIBIIO_VERSION_PATCH=0
-  LIBIIO_VERSION_GIT="v1.0"
-  HAS_STRTOK_R=1
-  LIBIIO_SCAN_BACKENDS=""
-  DISABLE_SECURE_SOCKET=1
-  ${IIOD_PLATFORM_DEFS}
-)
-
-if(IIOD_TRANSPORT STREQUAL "usb")
-  string(TOUPPER ${BOARD} _board_upper)
-  target_compile_definitions(libiio-noos PRIVATE
-    NO_OS_USB_TRANSPORT
-    NO_OS_USB_PRODUCT="${_board_upper} IIO"
-  )
-endif()
-
-target_link_libraries(libiio-noos PRIVATE no-os)
+target_link_libraries(libiio-noos PRIVATE libiio-noos-server no-os)
 
 config_platform_sdk(libiio-noos)
 add_flash_target(libiio-noos)

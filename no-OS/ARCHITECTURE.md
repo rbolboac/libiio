@@ -744,9 +744,17 @@ only at the missing glue). The no-OS side and its SDK install are unchanged.
 Without `BOARD` the directory is a host project that builds only the PC-side
 API tests (`tests/`).
 
-`COMMON_DEFS` in `CMakeLists.txt` turn off every upstream backend
-(`WITH_LOCAL_BACKEND=0` and friends). They also set `WITH_LIBTINYIIOD=1`,
-`WITH_EXTERNAL_BACKEND=1` and `NO_THREADS=1`, and pin the version strings.
+The server half is `libiio_noos_add_server()` in
+`cmake/libiio_noos_server.cmake`: an OBJECT library with the libiio core,
+tinyiiod, the responder, `backend.c` and `iiod/<transport>.c`. Its defines turn
+off every upstream backend (`WITH_LOCAL_BACKEND=0` and friends). They also set
+`WITH_LIBTINYIIOD=1`, `WITH_EXTERNAL_BACKEND=1` and `NO_THREADS=1`, and pin the
+version strings. They are PUBLIC, together with `include/` and `no-OS/include`,
+so the device classes linked next to it see the same `<iio/iio.h>`. The rest
+of libiio's headers stay private. It takes `no-os` as `$<COMPILE_ONLY:...>`:
+headers, defines and the forced `no_os_config.h`, but not the objects, which
+reach the link through the executable once. `CMakeLists.txt` here is one
+caller.
 
 Gotchas:
 
