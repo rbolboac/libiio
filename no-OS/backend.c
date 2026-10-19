@@ -15,6 +15,9 @@
 struct noos_iio_device_info noos_iio_devices[NOOS_IIO_MAX_DEVICES];
 unsigned int noos_iio_device_count;
 
+/* Buffers open per registered device: no format may change under one. */
+static unsigned int noos_open_buffers[NOOS_IIO_MAX_DEVICES];
+
 struct iio_buffer_pdata {
 	const struct iio_device *dev;
 	/* Owned by the buffer stream, valid until the buffer is closed. */
@@ -30,6 +33,14 @@ struct iio_block_pdata {
 	int error;
 };
 
+static unsigned int *noos_open_count(const struct iio_device *dev)
+{
+	const struct noos_iio_device_info *info = (const struct noos_iio_device_info *)
+		iio_device_get_pdata(dev);
+
+	return &noos_open_buffers[info - noos_iio_devices];
+}
+
 static struct iio_buffer_pdata *
 noos_open_buffer(const struct iio_device *dev,
 		 unsigned int idx,
@@ -42,6 +53,7 @@ noos_open_buffer(const struct iio_device *dev,
 
 	pdata->dev = dev;
 	pdata->mask = mask;
+	(*noos_open_count(dev))++;
 
 	return pdata;
 }
@@ -75,6 +87,7 @@ static void noos_close_buffer(struct iio_buffer_pdata *pdata)
 	if (pdata->enabled)
 		noos_enable_buffer(pdata, 0, false, false);
 
+	(*noos_open_count(pdata->dev))--;
 	free(pdata);
 }
 
@@ -255,6 +268,53 @@ static int noos_set_trigger(const struct iio_device *dev,
 	return trigger == fixed ? 0 : -EINVAL;
 }
 
+/*
+ * A scan element's format can depend on the device's configuration (a
+ * differential input is signed, an oversampled one wider). The device
+ * reports its current one; clients ask for it before opening a buffer,
+ * after changing that configuration. Not while a buffer is open: blocks
+ * already queued were laid out with the old format.
+ */
+static int noos_refresh_format(const struct iio_channel *chn)
+{
+	const struct iio_device *dev = iio_channel_get_device(chn);
+	const struct noos_iio_device_info *info = (const struct noos_iio_device_info *)
+		iio_device_get_pdata(dev);
+	struct iio_channel *chn_rw = (struct iio_channel *)chn;
+	struct iio_data_format fmt;
+	int ret;
+
+	if (!iio_channel_is_scan_element(chn))
+		return -EINVAL;
+
+	/* A device without the hook has static formats: nothing changes. */
+	if (!info || !info->get_scan_format)
+		return 0;
+
+	if (*noos_open_count(dev))
+		return -EBUSY;
+
+	fmt = chn->format;
+	ret = info->get_scan_format(info->dev, chn, &fmt);
+	if (ret)
+		return ret;
+
+	if (!fmt.length || fmt.length % 8 || fmt.bits > fmt.length ||
+	    fmt.shift >= fmt.length)
+		return -EINVAL;
+
+	if (!fmt.repeat)
+		fmt.repeat = 1;
+
+	/* The scale and offset come from their attributes, as on the client. */
+	fmt.with_scale = chn->format.with_scale;
+	fmt.scale = chn->format.scale;
+	fmt.offset = chn->format.offset;
+	chn_rw->format = fmt;
+
+	return 0;
+}
+
 static int noos_reg_read(const struct iio_device *dev, uint32_t address,
 			 uint32_t *value)
 {
@@ -362,6 +422,7 @@ static const struct iio_backend_ops noos_ops = {
 
 	.reg_read = noos_reg_read,
 	.reg_write = noos_reg_write,
+	.refresh_format = noos_refresh_format,
 };
 
 const struct iio_backend iio_external_backend = {

@@ -92,6 +92,7 @@ struct noos_iio_device_info {
 	noos_iio_enable_buffer_t enable_buffer;
 	noos_iio_reg_read_t reg_read;
 	noos_iio_reg_write_t reg_write;
+	noos_iio_get_scan_format_t get_scan_format;  /* formats that change */
 	bool is_trigger;                        /* id "triggerN", no channels */
 	const char *trigger;                    /* name of the trigger pacing it */
 };
@@ -114,6 +115,11 @@ typedef int (*noos_iio_enable_buffer_t)(void *dev, bool enable);
 `mask` is the buffer's enabled set (§6), `bytes` a whole number of scans.
 `enable_buffer` is optional and is called only on a real state change.
 
+`get_scan_format` is for a device whose scan formats depend on its
+configuration (a differential input is signed, an oversampled one wider). It
+fills in a scan element's current format and backs the `refresh_format` op
+(§5); without it, the formats `add_channels` gave are final.
+
 `noos_iio_register_device()` (`backend.c:186-196`) copies the struct into
 `noos_iio_devices[NOOS_IIO_MAX_DEVICES]` (16) and bumps `noos_iio_device_count`.
 Registration must happen **before** `iio_create_context`, because the context is
@@ -124,7 +130,7 @@ Still not carried: events.
 
 ## 5. Op-by-op mapping
 
-`noos_ops` (`backend.c:327-348`) fills 16 of the `iio_backend_ops` slots.
+`noos_ops` fills 17 of the `iio_backend_ops` slots.
 
 | op | function | behaviour | gap |
 |---|---|---|---|
@@ -141,6 +147,7 @@ Still not carried: events.
 | `enqueue_block` | `:153` | **performs the whole transfer inline**, with the mask, and stashes the result in `pdata->error` | not async |
 | `dequeue_block` | `:181` | `return pdata->error;` | ignores `nonblock`, no `-EBUSY`, no double-op detection |
 | `reg_read` / `reg_write` | `:242` / `:254` | `-ENOSYS` when the device hook is NULL | — |
+| `refresh_format` | `noos_refresh_format` | the device's `get_scan_format` for a scan element, keeping the cached `scale`/`offset` as the client backends do; a device without the hook succeeds unchanged; `-EBUSY` while a buffer of the device is open, because queued blocks used the old layout | — |
 
 Ordering worth knowing: `iio_stream` (and so `iio_rwdev`) enqueues its blocks
 **before** it enables the buffer. Because enqueue is synchronous here, the first
@@ -262,8 +269,10 @@ compiler rather than by a comment.
   with `res = iio_adc_hal.resolution_bits` (validated 1..32 in `iio_adc_init`).
   The 12-bit MAX32690 therefore publishes `be:u12/16`, the 16-bit demo
   `be:u16/16`. The format is part of the context XML, so it reflects the
-  `differential` setting **at context creation**; flipping `differential`
-  later changes the attribute but not the published format.
+  `differential` setting at context creation. After a client changes
+  `differential`, `iio_channel_refresh_format()` gets the new one
+  (`be:s16/16`), through `iio_adc_get_scan_format()` and the backend's
+  `refresh_format` op (§5); then the client opens its buffer.
 - `adc_regs[16]` (`:544-564`) backs `REG_READ`/`REG_WRITE` with plain RAM. It is a
   scratchpad for protocol testing, not real register access.
 

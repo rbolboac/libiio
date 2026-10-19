@@ -208,6 +208,20 @@ static int iio_adc_read_samples(void *dev, const struct iio_device *iio_dev,
 	return 0;
 }
 
+/* The format follows the channel's differential setting (signed or not). */
+static int iio_adc_get_scan_format(void *dev, const struct iio_channel *chn,
+				   struct iio_data_format *fmt)
+{
+	int idx = adc_channel_index(iio_channel_get_id(chn));
+
+	if (idx < 0)
+		return idx;
+
+	adc_channel_format((unsigned int)idx, fmt);
+
+	return 0;
+}
+
 static int iio_adc_enable_buffer(void *dev, bool enable)
 {
 	/* The first read of the next stream starts the trigger again. */
@@ -474,6 +488,7 @@ int iio_adc_get_device_info(struct noos_iio_device_info *info)
 		.enable_buffer = iio_adc_enable_buffer,
 		.reg_read = iio_adc_reg_read,
 		.reg_write = iio_adc_reg_write,
+		.get_scan_format = iio_adc_get_scan_format,
 		.trigger = IIO_TRIGGER_TIMER_NAME,
 	};
 
