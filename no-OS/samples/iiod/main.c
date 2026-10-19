@@ -15,7 +15,7 @@
 #include <iio/iio.h>
 #include <iio/iio-backend.h>
 
-#include "iio_adc.h"
+#include "sample_adc.h"
 #include "iio_trigger_timer.h"
 #include "iio_device.h"
 
@@ -363,14 +363,20 @@ static int snake_get_device_info(struct noos_iio_device_info *info)
 
 static int noos_register_devices(void)
 {
+	/* The timer trigger paces the ADC buffer. */
+	const struct sample_adc_param adc_param = {
+		.trigger = IIO_TRIGGER_TIMER_NAME,
+		.wait_scan = iio_trigger_timer_wait,
+		.stop_scan = iio_trigger_timer_stop,
+	};
 	struct noos_iio_device_info info;
 	int ret;
 
-	ret = iio_adc_init();
+	ret = iio_trigger_timer_init();
 	if (ret)
 		return ret;
 
-	ret = iio_adc_get_device_info(&info);
+	ret = sample_adc_get_device_info(&adc_param, &info);
 	if (ret)
 		return ret;
 
@@ -378,7 +384,6 @@ static int noos_register_devices(void)
 	if (ret)
 		return ret;
 
-	/* Paces the ADC buffer; iio-adc names it as its trigger. */
 	ret = iio_trigger_timer_get_device_info(&info);
 	if (ret)
 		return ret;

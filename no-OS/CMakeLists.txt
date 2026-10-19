@@ -165,26 +165,26 @@ libiio_noos_add_server(libiio-noos-server
   DEFINITIONS ${IIOD_PLATFORM_DEFS}
 )
 
-# ---------- ADC HAL: the platform's own, else the hardware-free demo ----------
+# ---------- ADC: the platform's own, else the hardware-free demo ----------
 if(NOT IIOD_PLATFORM_ADC)
   set(IIOD_PLATFORM_ADC adc_demo)
 endif()
-set(ADC ${IIOD_PLATFORM_ADC} CACHE STRING "ADC HAL under drivers/adc/")
-if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/drivers/adc/${ADC}/${ADC}.c)
-  message(FATAL_ERROR "no ADC HAL drivers/adc/${ADC}/${ADC}.c")
+set(ADC ${IIOD_PLATFORM_ADC} CACHE STRING "ADC driver under samples/iiod/adc/")
+if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/samples/iiod/adc/${ADC}/${ADC}.c)
+  message(FATAL_ERROR "no ADC driver samples/iiod/adc/${ADC}/${ADC}.c")
 endif()
 
 add_executable(libiio-noos
-  ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_adc.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_trigger_timer.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_trigger_timer_no_os.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/drivers/adc/${ADC}/${ADC}.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/trigger/iio_trigger_timer.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/trigger/iio_trigger_timer_no_os.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/samples/iiod/adc/${ADC}/${ADC}.c
   ${CMAKE_CURRENT_SOURCE_DIR}/samples/iiod/main.c
   ${IIOD_PLATFORM_SRCS}
 )
 
 target_include_directories(libiio-noos PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/drivers
+  ${CMAKE_CURRENT_SOURCE_DIR}/trigger
+  ${CMAKE_CURRENT_SOURCE_DIR}/samples/iiod/adc
   ${IIOD_PLATFORM_DIR}
   ${IIOD_PLATFORM_INCLUDES}
 )

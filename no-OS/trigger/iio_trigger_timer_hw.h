@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef NOOS_DRIVERS_IIO_TRIGGER_TIMER_HW_H_
-#define NOOS_DRIVERS_IIO_TRIGGER_TIMER_HW_H_
+#ifndef NOOS_TRIGGER_IIO_TRIGGER_TIMER_HW_H_
+#define NOOS_TRIGGER_IIO_TRIGGER_TIMER_HW_H_
 
 #include <stdint.h>
 
 /*
- * The hardware tick behind drivers/iio_trigger_timer.c, implemented by
- * drivers/iio_trigger_timer_no_os.c through no-OS's timer and IRQ API with
+ * The hardware tick behind trigger/iio_trigger_timer.c, implemented by
+ * trigger/iio_trigger_timer_no_os.c through no-OS's timer and IRQ API with
  * the TRIGGER_* wiring of the platform's timers.h.
  */
 
@@ -34,4 +34,4 @@ int iio_trigger_timer_hw_start(uint32_t freq_hz, void (*tick)(void));
  */
 void iio_trigger_timer_hw_stop(void);
 
-#endif /* NOOS_DRIVERS_IIO_TRIGGER_TIMER_HW_H_ */
+#endif /* NOOS_TRIGGER_IIO_TRIGGER_TIMER_HW_H_ */

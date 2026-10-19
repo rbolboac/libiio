@@ -17,9 +17,10 @@
 #
 # Link <name> into the executable. It brings the objects, the libiio defines
 # (LIBIIO_STATIC, NO_THREADS, ...) and the API include dirs (<iio/iio.h>,
-# iio_device.h) that the device classes registered with it need. The rest of
-# libiio's headers stay private: the repo root has attr.h, sort.h and
-# network.h, which must not shadow a project's own.
+# iio_device.h, the standard channels of iio_adc.h, iio_accel.h,
+# iio_temp.h, and iio_enum.h) that the devices registered with it need. The
+# rest of libiio's headers stay private: the repo root has
+# attr.h, sort.h and network.h, which must not shadow a project's own.
 
 set(LIBIIO_NOOS_DIR ${CMAKE_CURRENT_LIST_DIR}/..)
 get_filename_component(LIBIIO_NOOS_DIR "${LIBIIO_NOOS_DIR}" REALPATH)
@@ -48,6 +49,7 @@ set(LIBIIO_NOOS_CORE_SRCS
   ${LIBIIO_DIR}/iiod/rw.c
   ${LIBIIO_NOOS_DIR}/backend.c
   ${LIBIIO_NOOS_DIR}/backend_table.c
+  ${LIBIIO_NOOS_DIR}/iio_enum.c
 )
 
 function(libiio_noos_add_server name)

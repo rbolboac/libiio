@@ -8,7 +8,7 @@
 #
 #   IIOD_PLATFORM_SRCS      board bring-up (noos_platform_init)
 #   IIOD_PLATFORM_DEFS      part-specific defines
-#   IIOD_PLATFORM_ADC       default ADC HAL under drivers/adc/
+#   IIOD_PLATFORM_ADC       default ADC driver under samples/iiod/adc/
 #   WITH_IIOD_V0_COMPAT     default OFF here, see below
 #
 # The stack (8 KiB) and heap (32 KiB, all of DSRAM_B) are no-OS's own for the

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef NOOS_DRIVERS_IIO_TRIGGER_TIMER_H_
-#define NOOS_DRIVERS_IIO_TRIGGER_TIMER_H_
+#ifndef NOOS_TRIGGER_IIO_TRIGGER_TIMER_H_
+#define NOOS_TRIGGER_IIO_TRIGGER_TIMER_H_
 
 #include "iio_device.h"
 
@@ -41,4 +41,4 @@ void iio_trigger_timer_stop(void);
  */
 int iio_trigger_timer_get_device_info(struct noos_iio_device_info *info);
 
-#endif /* NOOS_DRIVERS_IIO_TRIGGER_TIMER_H_ */
+#endif /* NOOS_TRIGGER_IIO_TRIGGER_TIMER_H_ */

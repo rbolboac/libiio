@@ -8,7 +8,7 @@
 #   IIOD_PLATFORM_SRCS      MSDK sources the no-os target list leaves out
 #   IIOD_PLATFORM_INCLUDES  their private header dirs
 #   IIOD_PLATFORM_DEFS      part-specific defines (ADC wiring)
-#   IIOD_PLATFORM_ADC       default ADC HAL under drivers/adc/
+#   IIOD_PLATFORM_ADC       default ADC driver under samples/iiod/adc/
 #
 # Read after add_subdirectory(no-OS), so the no-os target and MAXIM_LIBRARIES
 # (set by the no-OS toolchain file) are both known.
@@ -46,7 +46,7 @@ endfunction()
 set(IIOD_STACK_SIZE 0x10000 CACHE STRING "Main stack size (bytes)")
 target_compile_definitions(no-os PRIVATE __STACK_SIZE=${IIOD_STACK_SIZE})
 
-# ---------- ADC: parts the common_api HAL has been brought up on ----------
+# ---------- ADC: parts the common_api driver has been brought up on ----------
 # The IIO device takes the part's name, e.g. max32690-adc.
 list(APPEND IIOD_PLATFORM_DEFS IIO_ADC_NAME="${TARGET}-adc")
 if(TARGET_NUM STREQUAL "32690")
