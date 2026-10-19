@@ -327,23 +327,27 @@ and `iio-adc` reports `trigger0` as its trigger (`iio_info` shows it; over the
 wire the responder's `GETTRIG` maps `noos_get_trigger`'s result to a device
 index).
 
-Mechanics (`iio_trigger_timer.c`):
+Mechanics. `iio_trigger_timer.c` holds the platform-independent part: ticks,
+wait, attribute. The hardware tick sits behind `iio_trigger_timer_hw.h`
+(`_hw_init`, `_hw_start(freq_hz, tick)`, `_hw_stop`).
+`drivers/iio_trigger_timer_no_os.c` implements it with no-OS's timer and IRQ
+API and the `TRIGGER_*` wiring of `timers.h`, on every platform.
 
-- `iio_trigger_timer_init` — called from `iio_adc_init` — sets up the IRQ
-  controller and fills in the `NO_OS_EVT_TIM_ELAPSED` callback. The ISR only
-  does `ticks++`.
+- `iio_trigger_timer_init` — called from `iio_adc_init` — runs `_hw_init`
+  (no-OS: sets up the IRQ controller and fills in the `NO_OS_EVT_TIM_ELAPSED`
+  callback). The ISR only does `ticks++`.
 - `iio_trigger_timer_wait` — returns at once when `sampling_frequency` is 0
-  (free running, the old behaviour). Otherwise starts the timer on first use
-  (`ticks_count = TRIGGER_TIMER_FREQ_HZ / freq_hz`), spins until `ticks`
-  changes, then sets `seen = ticks`. Start order is `no_os_timer_init` →
+  (free running, the old behaviour). Otherwise starts the timer on first use,
+  spins until `ticks` changes, then sets `seen = ticks`. In the no-OS backend
+  `ticks_count = TRIGGER_TIMER_FREQ_HZ / freq_hz`, and start order is `no_os_timer_init` →
   `no_os_irq_register_callback` → `no_os_irq_enable` → `no_os_timer_start`,
   as `iiod/usb.c` does for its tick: on Maxim, registering the callback is what
   sets the timer's interrupt enable, and `no_os_timer_init` resets the timer
   (`MXC_TMR_Shutdown` + `MXC_TMR_Init`). Registering first leaves the timer
   running without interrupts and the wait spins forever on the first buffer. A scan slower than the period **resyncs**
   rather than bursting to catch up, so spacing never collapses.
-- The callback is registered and unregistered **with interrupts off**
-  (`trigger_cb_register`/`_unregister`). See the §13 gotcha on the shared
+- The no-OS backend registers and unregisters the callback **with interrupts
+  off** (`trigger_cb_register`/`_unregister`). See the §13 gotcha on the shared
   callback-list iterator: without this, a stop racing the USB tick could free
   the tick's callback and freeze the board in a TMR0 interrupt storm.
 - `iio_trigger_timer_stop` — stop, disable IRQ, remove timer. Called on buffer
@@ -375,8 +379,8 @@ there is no `iio_desc` to hand them. What is reused is the pattern — a
 `no_os_timer` + `no_os_irq` callback, as in the ad7091r8-sdz
 `iio_timer_trigger_example` — through the same no-OS HAL APIs.
 
-Board wiring lives in `platform/maxim/timers.h`, included by `parameters.h`
-and by the trigger driver alone (so the driver does not pull in the static UART
+Board wiring lives in `platform/<platform>/timers.h`, included by `parameters.h`
+and by the trigger backend alone (so the driver does not pull in the static UART
 and network init structs):
 
 | define | value | used by |

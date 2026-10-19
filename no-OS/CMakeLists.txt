@@ -177,6 +177,7 @@ endif()
 add_executable(libiio-noos
   ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_adc.c
   ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_trigger_timer.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/drivers/iio_trigger_timer_no_os.c
   ${CMAKE_CURRENT_SOURCE_DIR}/drivers/adc/${ADC}/${ADC}.c
   ${CMAKE_CURRENT_SOURCE_DIR}/samples/iiod/main.c
   ${IIOD_PLATFORM_SRCS}
