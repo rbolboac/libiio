@@ -1958,12 +1958,23 @@ int iiod_client_refresh_format(struct iiod_client *client, const struct iio_devi
 	struct iiod_command cmd = {
 		.op = IIOD_OP_REFRESH_FORMAT,
 		.dev = (uint8_t)iio_device_get_index(dev),
-		.code = (int32_t)iio_channel_get_index(chn),
 	};
 	struct iiod_buf iiod_buf = {
 		.ptr = format_str,
 		.size = len,
 	};
+	unsigned int i;
+
+	/* The server looks the channel up by its position, as for the other
+	 * channel commands, not by its scan index. */
+	for (i = 0; i < iio_device_get_channels_count(dev); i++)
+		if (iio_device_get_channel(dev, i) == chn)
+			break;
+
+	if (i == iio_device_get_channels_count(dev))
+		return -EINVAL;
+
+	cmd.code = (int32_t)i;
 
 	return iiod_io_exec_command(io, &cmd, NULL, &iiod_buf);
 }
