@@ -227,26 +227,6 @@ static int snake_render(char *dst, size_t len)
 	return (int)pos + 1;
 }
 
-static int snake_emit_str(char *dst, size_t len, const char *val)
-{
-	int ret = snprintf(dst, len, "%s", val);
-
-	if (ret < 0 || (size_t)ret >= len)
-		return -EINVAL;
-
-	return ret + 1;
-}
-
-static int snake_emit_uint(char *dst, size_t len, unsigned int val)
-{
-	int ret = snprintf(dst, len, "%u", val);
-
-	if (ret < 0 || (size_t)ret >= len)
-		return -EINVAL;
-
-	return ret + 1;
-}
-
 static int snake_lookup_dir(const char *src, size_t len)
 {
 	unsigned int i;
@@ -319,20 +299,20 @@ static int snake_read_attr(void *dev, const struct iio_device *iio_dev,
 	}
 
 	if (!strcmp(name, "direction"))
-		return snake_emit_str(dst, len, snake_dirs[game.dir]);
+		return iio_value_format_str(dst, len, snake_dirs[game.dir]);
 
 	if (!strcmp(name, "score"))
-		return snake_emit_uint(dst, len, game.score);
+		return iio_value_format_int(dst, len, game.score);
 
 	if (!strcmp(name, "high_score"))
-		return snake_emit_uint(dst, len, high_score);
+		return iio_value_format_int(dst, len, high_score);
 
 	if (!strcmp(name, "state"))
-		return snake_emit_str(dst, len,
-				      game.alive ? "running" : "over");
+		return iio_value_format_str(dst, len,
+					    game.alive ? "running" : "over");
 
 	if (!strcmp(name, "reset"))
-		return snake_emit_uint(dst, len, 0);
+		return iio_value_format_int(dst, len, 0);
 
 	return -EINVAL;
 }

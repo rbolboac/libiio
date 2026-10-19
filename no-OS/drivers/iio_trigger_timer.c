@@ -111,17 +111,11 @@ static int iio_trigger_timer_read_attr(void *dev,
 				       const struct iio_attr *attr,
 				       char *dst, size_t len)
 {
-	int ret;
-
 	if (attr->type != IIO_ATTR_TYPE_DEVICE ||
 	    strcmp(iio_attr_get_name(attr), "sampling_frequency"))
 		return -EINVAL;
 
-	ret = snprintf(dst, len, "%u", (unsigned int)trig.freq_hz);
-	if (ret < 0 || (size_t)ret >= len)
-		return -EINVAL;
-
-	return ret + 1;
+	return iio_value_format_int(dst, len, trig.freq_hz);
 }
 
 static int iio_trigger_timer_write_attr(void *dev,
@@ -129,20 +123,14 @@ static int iio_trigger_timer_write_attr(void *dev,
 					const struct iio_attr *attr,
 					const char *src, size_t len)
 {
-	unsigned long val;
-	char *end;
+	long long val;
 
 	if (attr->type != IIO_ATTR_TYPE_DEVICE ||
 	    strcmp(iio_attr_get_name(attr), "sampling_frequency"))
 		return -EINVAL;
 
-	if (*src < '0' || *src > '9')
-		return -EINVAL;
-
-	val = strtoul(src, &end, 10);
-	if (*end == '\n')
-		end++;
-	if (end == src || *end != '\0' || val > IIO_TRIGGER_TIMER_MAX_HZ)
+	if (iio_value_parse_int(src, &val) || val < 0 ||
+	    val > IIO_TRIGGER_TIMER_MAX_HZ)
 		return -EINVAL;
 
 	/* The next wait restarts the timer at the new period. */

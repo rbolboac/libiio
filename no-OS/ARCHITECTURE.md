@@ -250,11 +250,11 @@ shared `adc.h` here.
 
 ### Attribute plumbing
 
-- values are formatted by `adc_emit_int` / `adc_emit_str` / `adc_emit_micro`
-  (`:66-100`) and parsed by `adc_parse_int` / `adc_parse_micro` (`:102-169`):
-  `scale` is `int.micro`, `gain`/`reference` are strings from the tables, the
-  rest are integers. Every emitter checks `snprintf` truncation and returns
-  `-EINVAL` rather than a cut value.
+- values are formatted and parsed with libiio's `iio_value_*` helpers (§12):
+  `scale` is `int.micro`, `gain`/`reference` are strings from the tables
+  (`iio_value_match_str`), the rest are integers. A value that does not fit is
+  `-ERANGE`, not a cut value.
+
 - `adc_channel_index` (`:188-200`) resolves a channel id to an index by `strcmp`
   against `iio_adc_hal.channels[]`.
 - `iio_adc_read_attr` (`:377-447`) — `raw` and `process` call
@@ -614,13 +614,18 @@ client can tell an enqueue failure from a dequeue failure in one status word.
 
 ## 12. Value formatting
 
-There is no shared value-formatting module any more; each device class formats
-its own attributes with small `snprintf` helpers that check for truncation
-(`adc_emit_*` in `iio_adc.c`, `snake_emit_*` in `samples/iiod/main.c`, the
-`sampling_frequency` read in `iio_trigger_timer.c`). The text forms match what a
-Linux IIO driver prints: plain integers, `int.micro` with six fractional digits
-for `scale`, and bare strings for enumerations. A read returns the length
-**including** the terminating NUL, as the responder expects.
+Device classes format and parse their attributes with libiio's `iio_value_*`
+helpers, declared in `<iio/iio-backend.h>` next to `iio_snprintf()`:
+
+- `iio_value_format_int/str/fixed/list` write the value and return its length
+  **including** the terminating NUL, as the responder expects, or `-ERANGE`
+  if it does not fit;
+- `iio_value_parse_int/fixed` accept one trailing newline;
+- `iio_value_match_str` looks a written string up in a table.
+
+They are integer and fixed-point only, so no float `printf` is needed. The text
+forms match what a Linux IIO driver prints: plain integers, `int.micro` with
+six fractional digits for `scale`, and bare strings for enumerations.
 
 Every attribute read is capped at 256 bytes on this build:
 `iiod/responder.c:24-26` sets `READ_ATTR_BUF_SIZE 256` under
