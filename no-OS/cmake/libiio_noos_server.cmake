@@ -47,6 +47,7 @@ set(LIBIIO_NOOS_CORE_SRCS
   ${LIBIIO_DIR}/iiod-responder.c
   ${LIBIIO_DIR}/iiod/rw.c
   ${LIBIIO_NOOS_DIR}/backend.c
+  ${LIBIIO_NOOS_DIR}/backend_table.c
 )
 
 function(libiio_noos_add_server name)

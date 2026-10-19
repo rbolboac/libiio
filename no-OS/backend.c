@@ -10,6 +10,8 @@
 #include <no_os_print_log.h>
 #include <iio_device.h>
 
+#include "backend_table.h"
+
 #define NOOS_BACKEND_VERSION "no-OS 1.0 " __DATE__ " " __TIME__
 
 struct noos_iio_device_info noos_iio_devices[NOOS_IIO_MAX_DEVICES];
@@ -70,10 +72,12 @@ static int noos_enable_buffer(struct iio_buffer_pdata *pdata,
 	struct noos_iio_device_info *info = noos_buffer_info(pdata);
 	int ret;
 
-	if (info && info->enable_buffer && pdata->enabled != enable) {
-		ret = info->enable_buffer(info->dev, enable);
-		if (ret)
-			return ret;
+	if (info && pdata->enabled != enable) {
+		if (info->enable_buffer) {
+			ret = info->enable_buffer(info->dev, enable);
+			if (ret)
+				return ret;
+		}
 	}
 
 	pdata->enabled = enable;
@@ -198,13 +202,22 @@ static int noos_dequeue_block(struct iio_block_pdata *pdata, bool nonblock)
 
 int noos_iio_register_device(const struct noos_iio_device_info *info)
 {
+	int ret;
+
 	if (!info)
 		return -EINVAL;
 
 	if (noos_iio_device_count >= NOOS_IIO_MAX_DEVICES)
 		return -ENOMEM;
 
-	noos_iio_devices[noos_iio_device_count++] = *info;
+	noos_iio_devices[noos_iio_device_count] = *info;
+
+	/* A table-driven device gets the generic callbacks it left NULL. */
+	ret = noos_iio_table_install(&noos_iio_devices[noos_iio_device_count]);
+	if (ret)
+		return ret;
+
+	noos_iio_device_count++;
 	return 0;
 }
 
