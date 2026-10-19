@@ -116,7 +116,7 @@ int iiod_uart_run(struct no_os_uart_desc *uart_desc)
 	ret = iiod_init();
 	if (ret < 0) {
 		pr_err("iiod_init failed: %d\n", ret);
-		return ret; // comun cu zephyr 
+		return ret;
 	}
 
 	ctx = iio_create_context(&ctx_params, "no-os:");

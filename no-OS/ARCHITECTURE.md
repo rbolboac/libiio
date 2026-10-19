@@ -4,13 +4,6 @@ How libiio v1.0 is wired into the ADI no-OS framework, layer by layer, with
 `file:line` citations so every claim can be re-verified. Line numbers drift; the
 surrounding function names do not, so grep the name if a number no longer matches.
 
-**Reference implementation.** The Zephyr port is the reference for this one — the
-two are kept interface-compatible on purpose. The live Zephyr tree is
-**`~/RaluZephyr/zephyr/`**. The `zephyr/` directory checked into this repo is a
-**stale snapshot**: its `backend.c` is 104 lines with a 4-op ops table and no
-buffer support at all. Reading that copy and concluding "Zephyr cannot do X" is
-wrong. See §14.
-
 ---
 
 ## 1. What libiio v1.0 expects from a backend
@@ -80,7 +73,7 @@ The scan-element loop is not optional. Scan elements became buffer-owned upstrea
 and without registering them the buffer reports zero of them, which is what
 `iio_rwdev` uses to compute the sample size — it fails with a trigger timeout or
 zero-length reads. `NULL` is passed for `en_path` because there is no sysfs enable
-file on bare metal. The Zephyr port does the same thing at `backend.c:129-136`.
+file on bare metal.
 
 ## 4. Device registry
 
@@ -108,9 +101,8 @@ Fill it with a designated initializer (every driver in the tree does,
 `*info = (struct noos_iio_device_info) { ... }`), so fields a device does not
 use are zero.
 
-The callback typedefs (`:26-58`) mirror Zephyr's `iio_device_driver_api` but take a
-plain `void *dev` where Zephyr takes `const struct device *`. The sample path
-carries the channel information Zephyr's `readbuf` gets:
+The callback typedefs (`:26-58`) take the device as a plain `void *dev`. The
+sample path carries the channel information a capture needs:
 
 ```c
 typedef int (*noos_iio_read_samples_t)(void *dev,
@@ -185,8 +177,7 @@ allocated at `buffer.c:145-153`, passed at `:167`, freed only in
 `iio_buffer_close` (`:196`). Consequences:
 
 - the pointer is stable for the buffer's lifetime, so a backend **may store it**
-  without copying — this is what the Zephyr port does, and what `backend.c`
-  now does
+  without copying, which is what `backend.c` does
 - it is fully populated before `open_buffer` is called
 - it is non-`const` on purpose: a backend may write bits back for channels the
   hardware forces on, e.g. coupled pairs (`local.c:1763-1773`)
@@ -199,8 +190,7 @@ an `index`, aligns each element to its own length, and pads the total.
 
 ## 7. `drivers/iio_adc.c` — the ADC device class
 
-Per-channel state, the analogue of Zephyr's
-`iio_device_io_channels_channel_adc_overrides`:
+Per-channel state:
 
 ```c
 struct adc_channel_state {
@@ -223,21 +213,18 @@ not output, **is** a scan element, with a format built per channel (below).
 
 ### Where the attributes come from — do not re-litigate this
 
-`gain_values[]` (21 entries) and `reference_values[]` (7 entries) at `:17-51` are
-**copied from the Zephyr port on purpose**, added by commit `23b7d924`. They are
-indexed by Zephyr's `enum adc_gain` and `enum adc_reference` from
-`zephyr/include/zephyr/drivers/adc.h:42-64`.
-
-So 21 and 7 are **the Zephyr ADC API's complete enumerations, not MAX32690
-numbers.** They are a *namespace*, not a capability list: their job is to give
-every possible setting one agreed name and one agreed number, so that
-`gain = "1/6"` means the same thing to a host talking to either port. The `1/6`…`1/2`
-divider gains come from parts like the Nordic SAADC; the `×2`…`×128` steps from
-sigma-delta parts with a PGA. No single part implements more than a handful.
+`gain_values[]` (21 entries) and `reference_values[]` (7 entries) at `:17-51` were
+added by commit `23b7d924`. They are **a complete, part-independent enumeration
+of ADC gains and references, not MAX32690 numbers.** They are a *namespace*, not
+a capability list: their job is to give every possible setting one agreed name
+and one agreed number, so that `gain = "1/6"` means the same thing to a host
+whatever ADC is behind it. The `1/6`…`1/2` divider gains come from parts like the
+Nordic SAADC; the `×2`…`×128` steps from sigma-delta parts with a PGA. No single
+part implements more than a handful.
 
 They must therefore **not** be shrunk to match one part's silicon: renumbering
-would make `reference = 4` mean "Internal" on Zephyr and something else here, and
-the same host tool would misconfigure one of the two ports.
+would make `reference = 4` mean something different from one image to the next,
+and the same host tool would misconfigure some of them.
 
 What restricts writes to real hardware is the HAL hook, not the table — §8.
 
@@ -245,8 +232,7 @@ Since these indices are shared between this file and the part drivers, they are
 named in the header both layers already include, `include/iio_adc_hal.h`:
 `enum iio_adc_gain` and `enum iio_adc_reference`. The tables use designated
 initializers keyed to those enums, so the correspondence is checked by the
-compiler rather than by a comment. `iio_adc_hal.h` is the equivalent of Zephyr's
-shared `adc.h` here.
+compiler rather than by a comment.
 
 ### Attribute plumbing
 
@@ -254,7 +240,6 @@ shared `adc.h` here.
   `scale` is `int.micro`, `gain`/`reference` are strings from the tables
   (`iio_value_match_str`), the rest are integers. A value that does not fit is
   `-ERANGE`, not a cut value.
-
 - `adc_channel_index` (`:188-200`) resolves a channel id to an index by `strcmp`
   against `iio_adc_hal.channels[]`.
 - `iio_adc_read_attr` (`:377-447`) — `raw` and `process` call
@@ -263,8 +248,7 @@ shared `adc.h` here.
 - `iio_adc_write_attr` (`:449-542`) — `raw` and `process` are read-only,
   `-EPERM`. `gain` and `reference` push to hardware through the HAL hook before
   storing (§8).
-- `adc_channel_format` (`:222-236`) computes each channel's format **exactly as
-  Zephyr's `io_channels.c` does**:
+- `adc_channel_format` (`:222-236`) computes each channel's format:
 
   ```c
   .length     = NO_OS_DIV_ROUND_UP(res, 8) * 8,
@@ -279,15 +263,13 @@ shared `adc.h` here.
   The 12-bit MAX32690 therefore publishes `be:u12/16`, the 16-bit demo
   `be:u16/16`. The format is part of the context XML, so it reflects the
   `differential` setting **at context creation**; flipping `differential`
-  later changes the attribute but not the published format (Zephyr has the same
-  property).
+  later changes the attribute but not the published format.
 - `adc_regs[16]` (`:544-564`) backs `REG_READ`/`REG_WRITE` with plain RAM. It is a
   scratchpad for protocol testing, not real register access.
 
 ### The sample path
 
-`iio_adc_read_samples` (`:250-332`) is the no-OS rendering of Zephyr's
-`iio_device_io_channels_readbuf`:
+`iio_adc_read_samples` (`:250-332`):
 
 1. `sample_size = iio_device_get_sample_size(iio_dev, mask)`; `bytes` must be a
    whole number of scans, else `-EINVAL`
@@ -303,9 +285,9 @@ Enabling only `voltage1` on the demo gives a 2-byte scan of channel 1 alone;
 enabling both gives `v0 v1 v0 v1 …`. `iio_adc_enable_buffer` (`:334-341`) stops
 the trigger on disable; the next stream's first wait restarts it.
 
-What it still does not do: per-channel chunked capture through the sequencer
-(Zephyr's `extra_samplings`) — each value is one `read_raw`, which is what makes
-the timer pacing meaningful (§7a).
+What it still does not do: per-channel chunked capture through the sequencer.
+Each value is one `read_raw`, which is what makes the timer pacing meaningful
+(§7a).
 
 ## 7a. `drivers/iio_trigger_timer.c` — the sampling trigger
 
@@ -362,11 +344,11 @@ optional `timers.h` defines cover a no-OS layer that differs from Maxim's
 - `sampling_frequency` — Hz, default 1000, range 0..100000
   (`IIO_TRIGGER_TIMER_{DEFAULT,MAX}_HZ`).
 
-Deliberate differences from Zephyr's `trigger_timer.c`:
+Deliberate design choices:
 
-- **`sampling_frequency` in Hz, one scan per tick**, vs Zephyr's
-  `sampling_period` in ms filling one whole *block* per tick. Per-scan pacing is
-  what gives evenly spaced samples; per-block pacing only spaces the blocks.
+- **`sampling_frequency` in Hz, one scan per tick**, rather than a period that
+  fills one whole *block* per tick. Per-scan pacing is what gives evenly spaced
+  samples; per-block pacing only spaces the blocks.
   `sampling_frequency` is also the attribute name of the Linux
   `iio-trig-hrtimer`, so host tooling already knows it.
 - **Spin, not work queue.** `NO_THREADS=1` (§10): the wait blocks the
@@ -426,14 +408,11 @@ registry, no indirection cost.
 
 `set_gain` and `set_reference` are **optional**. `iio_adc_write_attr` calls the
 hook only when it is non-NULL, and stores the new value only when the hook returns
-0 — hardware first, state second. This is Zephyr's order:
-`io_channels.c:442-468` builds a `struct adc_channel_cfg`, calls
-`adc_channel_setup`, and assigns `data->overrides[index].adc.X` only on success.
-A NULL hook means the value is accepted and stored as before, so drivers that do
+0 — hardware first, state second. A NULL hook means the value is accepted and stored as before, so drivers that do
 not implement it are unaffected.
 
 A hook may reject values the silicon cannot produce. The attribute stays fully
-visible and enumerable — interface parity with Zephyr — and the write fails
+visible and enumerable, and the write fails
 honestly with `-ENOTSUP` instead of being silently accepted.
 
 `read_raw` has to be a function pointer because the MSDK ADC API genuinely differs
@@ -474,21 +453,18 @@ failure in any future multi-slot sequencer work.
 
 ## 9. Known gaps
 
-Each with the Zephyr code that already solves it, so picking one up is a read
-rather than a re-derivation. Details in §14.
-
-| gap | where | solved in RaluZephyr by |
+| gap | where | what solving it takes |
 |---|---|---|
-| synchronous enqueue; `nonblock` ignored | `backend.c:153-184` | pending list + `ready_sem`, `backend.c:374-416`, `trigger_timer.c:151-186` |
-| trigger pairing fixed at build time; `set_trigger` only accepts the fixed one | `backend.c:225-257` | `zephyr_set_trigger`, `include/iio_trigger.h` |
-| `cancel_buffer` cannot abort | `backend.c:81-83` | `zephyr_cancel_buffer:222-225` unsubscribes and wakes blocks |
+| synchronous enqueue; `nonblock` ignored | `backend.c:153-184` | a pending-block list filled by the trigger, with a completion flag `dequeue_block` waits on (`NO_THREADS`, §10) |
+| trigger pairing fixed at build time; `set_trigger` only accepts the fixed one | `backend.c:225-257` | triggers as a device class a buffer subscribes to |
+| `cancel_buffer` cannot abort | `backend.c:81-83` | unsubscribing the buffer from its trigger and waking pending blocks |
 
 Closed since the upstream reset (kept here so nobody re-opens them): channel
 mask stored and passed to `read_samples` (§5, §7); mask-filtered interleave of
 enabled channels (§7); per-channel computed format (§7); a real trigger device
 (§7a); `IIO_ADC_MAX_CHANNELS` checked against `num_channels` (§7).
 
-No Zephyr analogue, specific to this port:
+Specific to this port:
 
 - `iio_adc_hal` is a single link-time symbol and `chan_state[]` is file-scope, so
   exactly one ADC instance is possible per image
@@ -894,120 +870,3 @@ but not built. Keep `CONFIG_IIO` off, because its `iio/iiod.c` also defines
 On the ADuCM3029 the eval-adxl355-pmdz image is about 99 KB of flash and
 6.4 KiB of `.data` + `.bss`, with no-OS's 8 KiB stack and 32 KiB heap. The
 client sets the block size, so keep `iio_rwdev -b` small.
-
-## 14. Relationship to the Zephyr port
-
-> **Grep `~/RaluZephyr/zephyr/`, not `~/libiio/zephyr/`.**
-
-The in-repo `zephyr/` is a stale snapshot: 104-line `backend.c`, a 4-op
-`zephyr_ops` at `:91-96` (`create`, `read_attr`, `write_attr`, `get_trigger`, the
-last returning NULL at `:45-49`), no buffer or block ops — so `iio_buffer_open()`
-against it would fail `-ENOSYS` (`buffer.c:131-132`).
-
-The live tree (`~/RaluZephyr/zephyr/backend.c`, 442 lines) has a **14-op**
-`zephyr_ops` (`:418-434`): `create`, `read_attr`, `write_attr`, `get_trigger`,
-`set_trigger`, `open_buffer`, `close_buffer`, `enable_buffer`, `cancel_buffer`,
-`readbuf`, `create_block`, `free_block`, `enqueue_block`, `dequeue_block`
-(`writebuf` commented out). Patterns 1, 2 and the format are now matched;
-pattern 3 (async enqueue) is not, and pattern 4 is matched in spirit with the
-differences listed in §7a.
-
-### The four patterns to match
-
-**1. The mask is stored.** *(matched: `backend.c:noos_open_buffer`)* `zephyr_open_buffer:149-173` keeps it in the buffer
-pdata (`include/iio_device.h:15-30`):
-
-```c
-pdata->zephyr_dev = zephyr_dev;
-pdata->iio_dev = dev;
-pdata->mask = mask;
-```
-
-and every capture path takes it as an argument:
-`api->readbuf(zephyr_dev, iio_dev, pdata->mask, dst, len)` (`backend.c:249-336`).
-Legitimate because the mask is a `buf_stream`-owned copy with buffer lifetime (§6).
-The no-OS equivalent stores it and passes it through the `mask` parameter of
-`noos_iio_read_samples_t` (§4).
-
-**2. Capture honours the mask and interleaves.** *(matched:
-`iio_adc_read_samples`, §7, minus the chunked sequencer capture)*
-`iio_device_io_channels_readbuf` (`io_channels.c:1035`+):
-
-- build `ch_info[READBUF_MAX_ENABLED_CHANNELS]` (8), skipping any channel where
-  `!iio_channel_is_scan_element(chn) || !iio_channel_is_enabled(chn, mask)`
-- accumulate a per-channel `byte_offset` and a total `bytes_per_sample`
-- per channel, capture in chunks of `READBUF_CHUNK_SAMPLES` (256) using
-  `adc_sequence_options{.extra_samplings = chunk - 1}`
-- write each sample to `out + s * bytes_per_sample + ci->byte_offset`, honouring
-  `fmt->shift` and `fmt->is_be`
-- return `total_samples * bytes_per_sample`
-
-**3. Enqueue is genuinely asynchronous.** *(not matched — §5, §10)* `zephyr_enqueue_block:374-397` drains
-the block's semaphore, appends to `buf->pending_blocks` under a mutex, and submits
-the trigger's work item — then returns. `zephyr_dequeue_block:399-416` waits on
-`blk->ready_sem`: `K_NO_WAIT` → `-EBUSY` when `nonblock`, else `K_FOREVER`, and
-`-EBADF` if the buffer was disabled underneath it. The fill happens in the work
-handler (`trigger_timer.c:151-186`): pop a pending block,
-`to_write = MIN(blk->bytes_used, blk->size)`, `ops->readbuf(...)`,
-`k_sem_give(&blk->ready_sem)`.
-
-Not copyable verbatim: this port has `lock-dummy.c` and `NO_THREADS=1`, so the
-mutex/semaphore handshake has to become ISR flags plus a guarded WFI (§10).
-
-**4. Triggers are a device class.** *(matched as a registered device with
-`is_trigger`, §7a)* `include/iio_trigger.h`:
-
-```c
-struct iio_trigger_ops {
-	struct iio_device *(*create)(struct iio_context *ctx, const struct device *dev,
-				    enum iio_device_trigger_type type, const char *id);
-	void (*init)(const struct device *dev);
-	int  (*subscribe)(sys_snode_t *node);
-	void (*unsubscribe)(sys_snode_t *node);
-};
-```
-
-A trigger device is recognised by having **no `add_channels`** — `create_context`
-skips those when building the device list (`backend.c:107-110`).
-`trigger_timer.c` is the reference instance: a `k_timer` ISR submits to a
-dedicated work queue (`:31-35` — deliberately not the system queue, so RTIO
-processing is not blocked); `subscribe:92-122` appends the buffer, sets
-`buf->trig`, and starts the timer only when `refcnt` reaches 1;
-`unsubscribe:124-143` stops it at zero; `sampling_period` is a millisecond device
-attribute (`:188-256`). `enable_buffer:180-220` refuses to enable without a
-trigger (`-ENODEV`) or with a non-trigger (`-EINVAL`).
-
-This port uses the libiio core side directly: `iio_device_is_trigger`
-(`device.c:319`) recognises `trigger0` by its id prefix and zero channels, and
-`noos_get_trigger` resolves `info->trigger` with `iio_context_find_device`.
-`iio_device_set_trigger` (`:337`) reaches `noos_set_trigger`, which accepts
-only the fixed trigger; Zephyr has no `set_trigger` op at all.
-
-### Differences that should stay differences
-
-- **Device discovery.** Zephyr iterates a ROM section,
-  `STRUCT_SECTION_FOREACH(iio_device_info, ...)`, populated by
-  `IIO_DEVICE_DT_INST_DEFINE` from devicetree. no-OS has no devicetree, hence the
-  explicit `noos_iio_register_device()` table (§4).
-- **Channel index passing.** Zephyr stores the index in the channel pdata and
-  recovers it with `(int)(intptr_t)iio_channel_get_pdata(chn)`; no-OS resolves by
-  `strcmp` on the channel id (`adc_channel_index`, `iio_adc.c:92-104`).
-- **Locking.** Zephyr links a real `lock-zephyr.c`; no-OS links `lock-dummy.c`
-  (`CMakeLists.txt:23`).
-
-### What must stay identical
-
-The **attribute set** — that is the whole point of keeping the ports aligned, and
-the reason the tables are 21 and 7 entries wide (§7). RaluZephyr still applies
-gain, reference and differential by rebuilding a `struct adc_channel_cfg`, calling
-`adc_channel_setup`, and storing the override only on success
-(`io_channels.c:442-468`, `:565-591`, `:607-632`) — the order this port's HAL
-hooks now follow (§8).
-
-Two further points where the ports used to diverge, now aligned:
-
-- her scan elements are `true` (this port matches)
-- her per-channel format is *computed*: `.length = ceil(resolution / 8) * 8`,
-  `.bits = resolution`, `.is_signed = differential`, `.with_scale = true`,
-  `.scale = vref_mv / (1 << (resolution - is_signed))`, `.is_be = true` — this
-  port now computes the same (`adc_channel_format`, §7)

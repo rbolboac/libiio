@@ -91,11 +91,10 @@ static void iio_adc_state_init(void)
 }
 
 /*
- * Per-channel format, computed as the Zephyr io_channels driver does: the
- * storage is the resolution rounded up to whole bytes, big endian, signed for
- * a differential channel, and the scale is one LSB in millivolts. The format
- * is published in the context XML, so it follows the channel's differential
- * setting at context creation.
+ * Per-channel format: the storage is the resolution rounded up to whole
+ * bytes, big endian, signed for a differential channel, and the scale is one
+ * LSB in millivolts. The format is published in the context XML, so it
+ * follows the channel's differential setting at context creation.
  */
 static void adc_channel_format(unsigned int idx, struct iio_data_format *fmt)
 {

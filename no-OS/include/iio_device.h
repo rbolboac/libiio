@@ -20,8 +20,7 @@ extern "C" {
 #define NOOS_IIO_MAX_DEVICES 16
 
 /*
- * Callback types – mirror the Zephyr iio_device_driver_api but take
- * a generic void * instead of "const struct device *".
+ * Callback types: the device is the driver's own instance, a generic void *.
  */
 typedef int (*noos_iio_add_channels_t)(void *dev,
 		struct iio_device *iio_device);
@@ -37,7 +36,7 @@ typedef int (*noos_iio_write_attr_t)(void *dev,
 		const char *src, size_t len);
 
 /*
- * Sample transfer, same arguments as the Zephyr readbuf/writebuf: @mask says
+ * Sample transfer: @mask says
  * which scan elements the client enabled, and @data holds whole samples laid
  * out as iio_device_get_sample_size() describes -- the enabled channels only,
  * in channel order, each at its own format.

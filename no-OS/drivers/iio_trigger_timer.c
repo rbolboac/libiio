@@ -14,10 +14,9 @@
 #include "iio_trigger_timer_hw.h"
 
 /*
- * Timer trigger, the bare-metal counterpart of the Zephyr trigger_timer: a
- * hardware timer interrupt (iio_trigger_timer_hw.h) counts ticks, and a
- * sampling driver calls iio_trigger_timer_wait() once per scan. With no
- * threads the wait spins, so the transfer blocks for nb_samples /
+ * Timer trigger: a hardware timer interrupt (iio_trigger_timer_hw.h) counts
+ * ticks, and a sampling driver calls iio_trigger_timer_wait() once per scan.
+ * With no threads the wait spins, so the transfer blocks for nb_samples /
  * sampling_frequency seconds -- the transfer is synchronous either way.
  */
 struct iio_trigger_timer {
