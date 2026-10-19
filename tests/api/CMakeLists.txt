@@ -13,7 +13,8 @@ set(API_TEST_TARGETS
     test_attr
     test_typed_attr
     test_buffer
-    test_lowlevel)
+    test_lowlevel
+    test_value)
 
 # Create a helper library for common test utilities
 add_library(test_common STATIC test_framework.h)

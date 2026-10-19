@@ -11,8 +11,10 @@
 
 #include <errno.h>
 #include <iio/iio-debug.h>
+#include <limits.h>
 #include <locale.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -384,6 +386,185 @@ ssize_t __iio_printf iio_snprintf(char *buf, size_t len, const char *fmt, ...)
 	va_end(ap);
 
 	return (ssize_t)ret;
+}
+
+/* The length a read_attr returns: the string's, plus its NUL. */
+static ssize_t value_len(ssize_t ret, size_t len)
+{
+	if (!len)
+		return -ERANGE;
+
+	return ret < 0 ? ret : ret + 1;
+}
+
+static unsigned int value_pow10(unsigned int digits)
+{
+	unsigned int p = 1;
+
+	while (digits--)
+		p *= 10;
+
+	return p;
+}
+
+ssize_t iio_value_format_int(char *dst, size_t len, long long val)
+{
+	return value_len(iio_snprintf(dst, len, "%lld", val), len);
+}
+
+ssize_t iio_value_format_str(char *dst, size_t len, const char *val)
+{
+	return value_len(iio_snprintf(dst, len, "%s", val), len);
+}
+
+ssize_t iio_value_format_fixed(char *dst, size_t len, int val, int val2,
+			       unsigned int digits)
+{
+	long long ival = val, fval = val2;
+	bool negative = ival < 0 || fval < 0;
+
+	if (digits < 1 || digits > 9)
+		return -EINVAL;
+
+	if (ival < 0)
+		ival = -ival;
+	if (fval < 0)
+		fval = -fval;
+	if (fval >= value_pow10(digits))
+		return -EINVAL;
+
+	return value_len(iio_snprintf(dst, len, "%s%lld.%0*lld",
+				      negative ? "-" : "", ival,
+				      (int)digits, fval), len);
+}
+
+ssize_t iio_value_format_list(char *dst, size_t len, const int (*vals)[2],
+			      size_t count, unsigned int digits)
+{
+	size_t i, pos = 0;
+	ssize_t ret;
+
+	if (!len)
+		return -ERANGE;
+
+	dst[0] = '\0';
+
+	for (i = 0; i < count; i++) {
+		if (i) {
+			if (pos + 1 >= len)
+				return -ERANGE;
+			dst[pos++] = ' ';
+		}
+
+		ret = iio_value_format_fixed(dst + pos, len - pos,
+					     vals[i][0], vals[i][1], digits);
+		if (ret < 0)
+			return ret;
+
+		pos += (size_t)ret - 1;
+	}
+
+	return (ssize_t)pos + 1;
+}
+
+/* At the end of a written value: optionally one newline, then the NUL. */
+static bool value_end(const char *end)
+{
+	if (*end == '\n')
+		end++;
+
+	return *end == '\0';
+}
+
+int iio_value_parse_int(const char *src, long long *val)
+{
+	long long parsed;
+	char *end;
+
+	if (!src || !val)
+		return -EINVAL;
+
+	if (!(*src == '-' || *src == '+' || (*src >= '0' && *src <= '9')))
+		return -EINVAL;
+
+	errno = 0;
+	parsed = strtoll(src, &end, 10);
+	if (end == src || errno == ERANGE || !value_end(end))
+		return -EINVAL;
+
+	*val = parsed;
+
+	return 0;
+}
+
+int iio_value_parse_fixed(const char *src, int *val, int *val2,
+			  unsigned int digits)
+{
+	long long integer = 0;
+	unsigned int mult, fract = 0;
+	bool negative = false, fraction = false, digit = false;
+
+	if (!src || !val || !val2 || digits < 1 || digits > 9)
+		return -EINVAL;
+
+	mult = value_pow10(digits - 1);
+
+	if (*src == '-' || *src == '+')
+		negative = *src++ == '-';
+
+	for (; *src && *src != '\n'; src++) {
+		if (*src >= '0' && *src <= '9') {
+			digit = true;
+			if (!fraction) {
+				integer = integer * 10 + (*src - '0');
+				if (integer > INT_MAX)
+					return -EINVAL;
+			} else if (mult) {
+				fract += mult * (unsigned int)(*src - '0');
+				mult /= 10;
+			}
+		} else if (*src == '.' && !fraction) {
+			fraction = true;
+		} else {
+			return -EINVAL;
+		}
+	}
+
+	if (!digit || !value_end(src))
+		return -EINVAL;
+
+	*val = (int)integer;
+	*val2 = (int)fract;
+
+	/* -0.25 has no sign on its integer part, so the fraction carries it. */
+	if (negative) {
+		if (integer)
+			*val = -*val;
+		else
+			*val2 = -*val2;
+	}
+
+	return 0;
+}
+
+int iio_value_match_str(const char *const *table, size_t count,
+			const char *src, size_t len)
+{
+	size_t i;
+
+	if (!table || !src)
+		return -EINVAL;
+
+	while (len && (src[len - 1] == '\n' || src[len - 1] == '\0'))
+		len--;
+
+	for (i = 0; i < count; i++) {
+		if (table[i] && strlen(table[i]) == len &&
+		    !strncmp(src, table[i], len))
+			return (int)i;
+	}
+
+	return -EINVAL;
 }
 
 #ifndef __ZEPHYR__

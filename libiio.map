@@ -214,6 +214,13 @@ global:
 	iio_task_token_enqueue;
 	iio_thrd_create;
 	iio_thrd_join_and_destroy;
+	iio_value_format_fixed;
+	iio_value_format_int;
+	iio_value_format_list;
+	iio_value_format_str;
+	iio_value_match_str;
+	iio_value_parse_fixed;
+	iio_value_parse_int;
 	iiod_client_attr_read;
 	iiod_client_attr_write;
 	iiod_client_close_buffer;

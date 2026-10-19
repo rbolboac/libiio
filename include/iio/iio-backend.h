@@ -219,6 +219,34 @@ __api int iio_scan_add_result(struct iio_scan *ctx, const char *desc, const char
 #endif
 
 __api __iio_printf ssize_t iio_snprintf(char *buf, size_t len, const char *fmt, ...);
+
+/*
+ * Attribute values, for a backend's read_attr/write_attr: integer and
+ * fixed-point only, so no floating point is needed.
+ *
+ * The format functions write a NUL-terminated string to dst and return its
+ * length including the NUL, the value a read_attr returns, or -ERANGE if
+ * it does not fit in len bytes. Fixed-point values are val + val2 / 10^digits
+ * (digits 1..9: 6 for micro, 9 for nano), negative when val or val2 is.
+ *
+ * The parse functions take a NUL-terminated string, accept one trailing
+ * newline (echo appends one) and return 0 or -EINVAL.
+ */
+__api ssize_t iio_value_format_int(char *dst, size_t len, long long val);
+__api ssize_t iio_value_format_str(char *dst, size_t len, const char *val);
+__api ssize_t iio_value_format_fixed(char *dst, size_t len, int val, int val2,
+		unsigned int digits);
+/* The values separated by spaces, as an "_available" attribute lists them. */
+__api ssize_t iio_value_format_list(char *dst, size_t len, const int (*vals)[2],
+		size_t count, unsigned int digits);
+
+__api int iio_value_parse_int(const char *src, long long *val);
+/* "125", "125.5" and "-0.25" all parse; digits beyond 'digits' are dropped. */
+__api int iio_value_parse_fixed(const char *src, int *val, int *val2,
+		unsigned int digits);
+/* The index of src (len bytes, trailing NULs/newlines ignored) in table. */
+__api int iio_value_match_str(const char *const *table, size_t count,
+		const char *src, size_t len);
 __api char *iio_strdup(const char *str);
 __api size_t iio_strlcpy(char *__restrict dst, const char *__restrict src, size_t dsize);
 __api FILE *iio_fopen(const char *path, const char *mode);
