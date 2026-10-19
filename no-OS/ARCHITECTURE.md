@@ -725,11 +725,13 @@ the choice is cached as `NO_OS_PATH`.
   per-platform layout: it includes `cmake/<platform>/<platform>_platform_sdk.cmake`
   (aducm3029, pico, stm32, xilinx) and calls its `config_<platform>_sdk()`.
   Maxim has none, because its SDK is set up by the toolchain file.
-- `samples/iiod/platform/<PLATFORM>/platform.cmake` adds only what no-OS's target lists leave
-  out (for maxim: the MSDK ADC sources on max32690, which no-OS does not compile
-  there; added only if not already in `no-os`'s `SOURCES`, so no duplicate
-  symbols) and sets `IIOD_PLATFORM_ADC`: `common_api` on max32690/max32655,
-  `adc_demo` (no hardware) everywhere else.
+- `samples/iiod/platform/<PLATFORM>/platform.cmake` sets `IIOD_PLATFORM_ADC`:
+  `common_api` on max32690/max32655, `adc_demo` (no hardware) everywhere else.
+  no-OS builds the MSDK ADC driver for both parts; for max32690 that needs
+  no-OS with "drivers: platform: maxim: max32690: build the MSDK ADC driver",
+  and configure stops on an older checkout. `_maxim_add_msdk()` still adds
+  any MSDK source a target list leaves out, skipping those `no-os` already
+  compiles, so there are no duplicate symbols.
 
 Key variables:
 

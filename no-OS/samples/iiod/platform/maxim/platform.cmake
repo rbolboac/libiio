@@ -50,7 +50,15 @@ target_compile_definitions(no-os PRIVATE __STACK_SIZE=${IIOD_STACK_SIZE})
 # The IIO device takes the part's name, e.g. max32690-adc.
 list(APPEND IIOD_PLATFORM_DEFS IIO_ADC_NAME="${TARGET}-adc")
 if(TARGET_NUM STREQUAL "32690")
-  _maxim_add_msdk(ADC adc_me18 adc_revb)
+  # no-OS builds the max32690 MSDK ADC driver itself since "drivers: platform:
+  # maxim: max32690: build the MSDK ADC driver"; an older checkout fails at
+  # link time without it.
+  list(FIND _no_os_srcs "${_msdk}/Source/ADC/adc_me18.c" _idx)
+  if(_idx EQUAL -1)
+    message(FATAL_ERROR
+      "${NO_OS_PATH} does not build the max32690 MSDK ADC driver (adc_me18.c): "
+      "update no-OS to a revision that lists it in drivers/platform/maxim/max32690/.")
+  endif()
   list(APPEND IIOD_PLATFORM_DEFS IIO_ADC_CLOCK=MXC_ADC_CLK_IBRO)
   set(IIOD_PLATFORM_ADC common_api)
 elseif(TARGET_NUM STREQUAL "32655")
