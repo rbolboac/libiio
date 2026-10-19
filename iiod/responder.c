@@ -1309,13 +1309,6 @@ static ssize_t iiod_discard(void *d, size_t bytes)
 	return bytes;
 }
 
-static const struct iiod_responder_ops iiod_responder_ops = {
-	.cmd = iiod_cmd,
-	.read = iiod_read,
-	.write = iiod_write,
-	.discard = iiod_discard,
-};
-
 static void iiod_responder_free_resources(struct parser_pdata *pdata)
 {
 	struct buffer_entry *buf_entry, *buf_next;
@@ -1349,6 +1342,22 @@ static void iiod_responder_free_resources(struct parser_pdata *pdata)
 
 	iio_mutex_unlock(evlist_lock);
 }
+
+/* The buffers and event streams of the client before are only ever freed
+ * here on a link with no disconnect: without this, its buffer would make
+ * the next client's OPEN_BUFFER fail with -EEXIST. */
+static void iiod_reconnect(void *d)
+{
+	iiod_responder_free_resources(d);
+}
+
+static const struct iiod_responder_ops iiod_responder_ops = {
+	.cmd = iiod_cmd,
+	.read = iiod_read,
+	.write = iiod_write,
+	.discard = iiod_discard,
+	.reconnect = iiod_reconnect,
+};
 
 int binary_parse(struct parser_pdata *pdata)
 {

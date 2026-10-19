@@ -489,7 +489,11 @@ No Zephyr analogue, specific to this port:
 - serial has one client at a time and no disconnect: two contexts on the tty
   (`iio_stresstest -t 2`) interleave on the wire, and a client killed in the
   middle of a block leaves the board sending it to nobody, so the next client
-  starts out of sync. Both need a board reset; exit clients with Ctrl-C
+  starts out of sync. Both need a board reset; exit clients with Ctrl-C.
+  What a client leaves open between commands is not a problem: the next
+  client's `BINARY\r\n` handshake reaches the responder's `reconnect` op,
+  which frees the old client's buffers and event streams, so its
+  `OPEN_BUFFER` does not meet `-EEXIST`
 - latent NULL-deref in `iiod/responder.c:1249-1260` — `iiod_cmd` bounds-checks
   `cmd->op` against `IIOD_NB_OPCODES` but `iiod_op_functions[]` is a sparse
   designated-initializer array, so an unimplemented-but-in-range opcode calls a

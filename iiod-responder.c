@@ -266,6 +266,9 @@ static int iiod_responder_reader_worker(struct iiod_responder *priv)
 			 * after sending "BINARY\r\n" leaves us reading end of
 			 * file and taking this branch over and over. */
 
+			if (priv->ops->reconnect)
+				priv->ops->reconnect(priv->d);
+
 			iiod_rw_all(priv, NULL, &ok_buf, 1, ok_buf.size, false);
 			continue;
 		}

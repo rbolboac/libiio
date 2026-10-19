@@ -86,6 +86,11 @@ struct iiod_responder_ops {
 	ssize_t (*read)(void *d, const struct iiod_buf *buf, size_t nb);
 	ssize_t (*write)(void *d, const struct iiod_buf *buf, size_t nb);
 	ssize_t (*discard)(void *d, size_t bytes);
+
+	/* Optional: "BINARY\r\n" came in again, so on a link with no
+	 * disconnect, such as a serial line, the client that opened it is
+	 * gone and a new one starts; drop what the old one left open. */
+	void (*reconnect)(void *d);
 };
 
 /* Create / Destroy IIOD Responder. */
