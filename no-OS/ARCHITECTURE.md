@@ -36,14 +36,48 @@ error as a pointer, `iio_err(ptr)` to extract it (0 means a real pointer),
 transport     iiod/{uart,network,usb}.c     bytes in/out, handshake, main loop
 protocol      iiod/responder.c              v1 binary opcode dispatch
 backend       backend.c                     iio_backend_ops -> callback table
-device class  drivers/iio_adc.c             ADC IIO semantics, attrs, formatting
-silicon       drivers/adc/<part>/<part>.c    struct iio_adc_hal definition
+table         backend_table.c               channel table -> attributes, values, scans
+standard ABI  include/iio_{adc,accel,temp}.h  the standard channels of each type
+driver        a part's driver               its channel table, values, read_raw
 ```
 
 Each layer knows only the one below it. Concretely, and worth preserving:
-`backend.c` contains no ADC knowledge, `drivers/iio_adc.c` contains no `MXC_*`
-call, and the part drivers contain no libiio call. That is why adding a board means
-adding one file under `drivers/adc/` and nothing else.
+`backend.c` contains no ADC knowledge, the table layer knows no device
+type, and a driver contains no string formatting or parsing.
+
+**A device is described as a Linux driver describes it**: one table of
+channels (`struct noos_iio_chan`, Linux's `iio_chan_spec`) and one set of
+handlers (`read_raw`, `write_raw`, `read_avail`, `read_scan`, Linux's
+`iio_info`), on the device itself (§4). There are no device classes,
+capability structs or channel groups: a part with an accelerometer and a
+temperature lists both in its one table and switches on the channel type
+in its `read_raw`, as Linux's `adxl355_core.c` does.
+
+Two things keep the drivers short and alike:
+
+- **the standard channels of a type** (`include/iio_accel.h`,
+  `iio_temp.h`, `iio_adc.h`, §7b): macros that write a channel the way
+  every part of that type has it. The driver names the standard
+  attributes its part has; the macro puts each one where the type has it
+  (an accelerometer's scale and sampling frequency shared by type, an ADC's
+  sampling frequency on the device), so every accelerometer, temperature and
+  ADC shows the same ABI;
+- **values as data** (`struct noos_iio_value`, §4): a standard attribute
+  that is a constant (a scale) or picked from a table (a sampling
+  frequency, a filter corner) is one line, which the table layer serves
+  itself, list and write check included. `read_raw`/`write_raw` are left
+  with what needs the hardware: raw readings, calibrations.
+
+A type with no header yet (a DAC, a PLL, an IMU) writes its
+`noos_iio_chan` entries directly, which is all the macros do.
+
+Helpers: `iio_enum.c` (`include/iio_enum.h`), `struct noos_iio_enum` with
+`NOOS_IIO_ENUM(name, &e)`, an `ext` attribute that takes one of a list of
+names, as Linux's `IIO_ENUM` (the MAX32 ADC's `reference`); its
+`mask` says which names the part has, the others are `-ENOTSUP`;
+`NOOS_IIO_ENUM_AVAILABLE` lists them.
+
+Trigger: `trigger/iio_trigger_timer*.c` (§7a), used by the sample's ADC.
 
 ## 3. Context construction
 
@@ -120,11 +154,139 @@ configuration (a differential input is signed, an oversampled one wider). It
 fills in a scan element's current format and backs the `refresh_format` op
 (§5); without it, the formats `add_channels` gave are final.
 
+### Table-driven devices
+
+Instead of `add_channels`/`read_attr`/`write_attr`/`read_samples`, a device can
+describe its channels in a table and handle only values, the way a Linux IIO
+driver fills an `iio_chan_spec` and implements `read_raw`. The generic callbacks
+are in `backend_table.c`; `noos_iio_register_device()` checks the table and
+installs the ones the device left NULL.
+
+```c
+struct noos_iio_device_info {
+	...
+	/* as Linux's iio_dev + iio_info; the callbacks get dev */
+	const struct noos_iio_chan *channels;
+	unsigned int num_channels;
+	const struct noos_iio_ext_attr *attrs;	/* device attributes */
+	const struct noos_iio_value *values;	/* standard attributes as data */
+	unsigned int nb_values;
+	read_raw, read_raw_multi, write_raw, write_raw_get_fmt, read_avail;
+	read_scan, wait_scan;			/* + enable_buffer, get_scan_format */
+};
+
+struct noos_iio_chan {
+	/* what it is, as Linux's iio_chan_spec: gives the id */
+	enum noos_iio_chan_type type;		/* NOOS_IIO_VOLTAGE ... */
+	int channel, channel2;			/* number; modifier or other input */
+	bool indexed, modified, differential;
+	const char *id;				/* an id of its own instead */
+	long scan_index;			/* -1: not one */
+	bool output;
+	struct noos_iio_scan_type scan_type;	/* scan elements, as Linux's */
+	/* NOOS_IIO_INFO_BIT()s, each in one of them, as on Linux */
+	uint64_t info_mask_separate, info_mask_separate_available;
+	uint64_t info_mask_shared_by_type, info_mask_shared_by_type_available;
+	uint64_t info_mask_shared_by_dir, info_mask_shared_by_dir_available;
+	uint64_t info_mask_shared_by_all, info_mask_shared_by_all_available;
+	const struct noos_iio_ext_attr *ext;	/* other attributes, as text */
+	intptr_t priv;				/* the driver's */
+};
+
+struct noos_iio_value {				/* one line each: */
+	enum noos_iio_chan_type chan_type;	/* NOOS_IIO_CONST(ACCEL, SCALE, */
+	enum noos_iio_info info;		/*   INT_PLUS_NANO, 0, 38245)   */
+	int type;				/* NOOS_IIO_LIST(ACCEL, SAMP_FREQ, */
+	const int *vals; unsigned int nb;	/*   INT_PLUS_MICRO, odrs,      */
+	const int *(*avail)(void *dev, unsigned int *nb); /* get, set)  */
+	int (*get)(void *dev);			/* NOOS_IIO_LIST_FN(...): a */
+	int (*set)(void *dev, unsigned int idx); /*  table that changes   */
+};
+```
+
+The description follows Linux's so a driver ported from Linux, or written
+from its sysfs ABI, carries its `iio_chan_spec` and `read_raw` over almost
+as they are, and a client sees the same device either way. The enums
+(`noos_iio_info`, `noos_iio_val`, `noos_iio_chan_type`, `noos_iio_modifier`)
+are Linux's, in Linux's order, with `NOOS_` in front.
+
+- **scan type:** a scan element's `scan_type` is Linux's `struct
+  iio_scan_type`, field for field (`sign`, `realbits`, `storagebits`,
+  `shift`, `repeat`, `endianness` with `NOOS_IIO_BE`/`_LE`/`_CPU`), so a Linux
+  driver's carries over as it is. The table layer turns it into libiio's
+  format when it creates the channel (`le:s20/32>>0`); the scale clients
+  convert with is the channel's `scale` attribute, which libiio reads when it
+  creates the context. Registration refuses a scan element with no sign,
+  storage that is not 8 to 64 bits in whole bytes, or data and shift wider
+  than it.
+- **ids:** made as Linux names the channel: `voltage0`, `voltage0-voltage1`
+  (differential, must be indexed), `accel_x` (modified), `anglvel0_z`
+  (both), `temp` (neither); `id` overrides it.
+- **attributes:**
+  - each `NOOS_IIO_INFO_*` bit gives the standard attribute (all 32 of
+    Linux's: `raw`, `input`, `scale`, `offset`, `calibscale`, `calibbias`,
+    `peak_raw`, `mean_raw`, `sampling_frequency`, `frequency`, `phase`,
+    `hardwaregain`, `en`, `thermocouple_type`, ...), plus
+    `<name>_available` when the bit is also in the mask's `_available` one;
+  - the mask a bit is in places it where Linux does, as libiio's local
+    backend shows it: `separate` and `shared_by_type` ones are attributes
+    of the channel (file names `in_accel_x_scale`, `in_accel_scale`),
+    `shared_by_dir` ones are device attributes `in_<name>`/`out_<name>`,
+    `shared_by_all` ones device attributes `<name>`. A device attribute
+    several channels have is created once and served through the first of
+    them, as on Linux;
+  - a `noos_iio_value` entry serves its attribute on every channel of its
+    `chan_type`, before `read_raw` sees it: a read gives the row `get`
+    says, a write is parsed as the entry's `type` and must be a row of the
+    table (else `-EINVAL`; `-EPERM` without `set`), and `_available` lists
+    the table;
+  - otherwise `read_raw` returns any of Linux's `IIO_VAL_*` (same numbers):
+    INT, INT_PLUS_MICRO(_DB), INT_PLUS_NANO, INT_64 (low, high halves),
+    FRACTIONAL, FRACTIONAL_LOG2, CHAR, and INT_MULTIPLE from
+    `read_raw_multi`. The backend prints them as Linux's
+    `__iio_format_value()` does, digit for digit, and parses writes as
+    `write_raw_get_fmt` says (micro by default, which also takes plain
+    integers; a dB value may end in `dB`);
+  - `read_avail` returns a list or a `[min step max]` range;
+  - anything else is a `noos_iio_ext_attr` on the channel, or in the
+    device's `attrs`, read and written as text.
+- **checks:** `noos_iio_register_device()` refuses (`-EINVAL`) a channel
+  with a bit in two masks, an `_available` bit without its attribute, a bit
+  past `NOOS_IIO_INFO_COUNT`, an id it cannot make, an attribute neither a
+  value entry nor `read_raw` serves, a list neither a value entry nor
+  `read_avail` serves, a value entry no channel of its type has or that is
+  given twice, and a writable value of a type a write cannot be matched
+  against (FRACTIONAL). `tests/test_table.c` checks all of the above on
+  the host.
+- **buffers:**
+  - `wait_scan`, if set, paces each scan (the ADXL355 waits for
+    `DATA_RDY`), then `read_scan(dev, enabled, int64_t *vals)` gives a
+    value per enabled channel, `vals[i]` for bit `i`, the channel's index
+    in the table;
+  - the backend lays the sample out as `iio_device_get_sample_size()` does
+    (channel order, each element aligned to its own size, shared scan indexes
+    sharing storage) from each channel's *current* format, so a format that
+    `get_scan_format` changed packs without driver code;
+  - signed values are stored sign-extended over the whole element, unsigned
+    ones masked to their bits, both at their shift.
+- **buffer and formats:** a buffer enable or disable reaches
+  `enable_buffer`; `refresh_format` asks `get_scan_format`, and a device
+  without one has static formats.
+- **scope:** at most 32 channels, input only (`read_scan`), no `repeat > 1`.
+  A device that needs more keeps the callbacks; any callback it sets wins
+  over the generic one.
+
+`noos_iio_chan_of(chn)` gives the table entry a channel was created from, for
+`get_scan_format` and the `ext` callbacks. An `ext` entry carries a `priv`
+of its own, passed to its callbacks, so one handler serves several
+attributes (`noos_iio_enum`, §2).
+
 `noos_iio_register_device()` (`backend.c:186-196`) copies the struct into
 `noos_iio_devices[NOOS_IIO_MAX_DEVICES]` (16) and bumps `noos_iio_device_count`.
 Registration must happen **before** `iio_create_context`, because the context is
 built from a snapshot of that table. `samples/iiod/main.c:noos_register_devices`
-registers `iio-adc`, then the `timer0` trigger, then the snake game.
+registers the ADC (named after the part, `adc-demo` without hardware), then the
+`timer0` trigger, then the snake game.
 
 Still not carried: events.
 
@@ -195,110 +357,77 @@ For bytes-per-scan, use `iio_device_get_sample_size(dev, mask)`
 storage size) not `format.bits` (the meaningful bits), collapses channels sharing
 an `index`, aligns each element to its own length, and pads the total.
 
-## 7. `drivers/iio_adc.c` — the ADC device class
+## 7. `samples/iiod/adc/` — the sample's ADC
 
-Per-channel state:
+One ADC driver per image, the one the `ADC` cache variable picks
+(`samples/iiod/adc/${ADC}/${ADC}.c`): `common_api` on the MAX32 parts,
+`adc_demo` everywhere else. Each is an ordinary table-driven device with the
+standard ADC channels (`iio_adc.h`, §7b), like any other driver, and gives
+itself to `main.c` through `sample_adc.h`:
 
 ```c
-struct adc_channel_state {
-	int scale_val;
-	int scale_val2;
-	unsigned int gain;
-	unsigned int reference;
-	int differential;
+const struct sample_adc_param param = {
+	.trigger = IIO_TRIGGER_TIMER_NAME,	/* paces the buffer, §7a */
+	.wait_scan = iio_trigger_timer_wait,
+	.stop_scan = iio_trigger_timer_stop,
 };
-static struct adc_channel_state chan_state[IIO_ADC_MAX_CHANNELS];
+
+sample_adc_get_device_info(&param, &info);	/* brings the ADC up */
+noos_iio_register_device(&info);
 ```
-(`:56-64`)
 
-`iio_adc_add_channels` (`:343`) registers, per channel, six attributes —
-`raw`, `scale`, `gain`, `process`, `reference`, `differential` — plus one device
-attribute `internal_ref_voltage`. It refuses a HAL declaring more than
-`IIO_ADC_MAX_CHANNELS`. Channels are added with
-`iio_device_add_channel(iio_dev, (long)i, name, NULL, NULL, false, true, &fmt)`:
-not output, **is** a scan element, with a format built per channel (below).
+Both have, per input, `raw` and `scale`: one LSB in mV, the reference over
+2^bits (`NOOS_IIO_VAL_FRACTIONAL_LOG2`), so `raw * scale` is the input in
+mV as on Linux, and the same value the scan format carries. `scale` is
+read-only (`-EPERM`): it follows the reference. Neither has device
+attributes; the sampling frequency is the timer trigger's (§7a).
 
-### Where the attributes come from — do not re-litigate this
+- **adc_demo** (`adc-demo`, no hardware): `voltage0` and `voltage1`, 16-bit
+  over 2.5 V (`be:u16/16`, scale 0.038146972). `voltage0` plays a 32-step
+  sine, `voltage1` the same a quarter period on. The waveform moves one step
+  per scan; `raw` gives the current sample and does not move it. The scale
+  is one `NOOS_IIO_CONST` value; the whole driver is about 130 lines.
+- **common_api** (`max32690-adc`, `max32655-adc`, ... after the part): the
+  MCU's own ADC, `voltage0` ... `voltage<IIO_ADC_NUM_CHANNELS - 1>` (1 by
+  default), 12-bit on revB, 10-bit on revA (`be:u12/16`, `be:u10/16`).
+  `raw` is one conversion (§8). On revB the reference can be switched:
+  `reference` and `reference_available`, one value for the ADC whichever
+  input it is set through; the scale follows it.
 
-`gain_values[]` (21 entries) and `reference_values[]` (7 entries) at `:17-51` were
-added by commit `23b7d924`. They are **a complete, part-independent enumeration
-of ADC gains and references, not MAX32690 numbers.** They are a *namespace*, not
-a capability list: their job is to give every possible setting one agreed name
-and one agreed number, so that `gain = "1/6"` means the same thing to a host
-whatever ADC is behind it. The `1/6`…`1/2` divider gains come from parts like the
-Nordic SAADC; the `×2`…`×128` steps from sigma-delta parts with a PGA. No single
-part implements more than a handful.
+### The reference names — do not re-litigate this
 
-They must therefore **not** be shrunk to match one part's silicon: renumbering
-would make `reference = 4` mean something different from one image to the next,
-and the same host tool would misconfigure some of them.
+`reference` takes the shared names of ADC references, by number: `VDD`,
+`VDD/2`, `VDD/3`, `VDD/4`, `Internal`, `External0`, `External1`
+(`maxim_adc_references[]`). They are **a namespace, not a capability
+list**: their job is to give every possible reference one agreed name and
+number, so that `reference = "Internal"` means the same thing to a host
+whatever ADC is behind it. They must therefore **not** be shrunk to match one
+part's silicon, which would make the same number mean something different
+from one image to the next.
 
-What restricts writes to real hardware is the HAL hook, not the table — §8.
-
-Since these indices are shared between this file and the part drivers, they are
-named in the header both layers already include, `include/iio_adc_hal.h`:
-`enum iio_adc_gain` and `enum iio_adc_reference`. The tables use designated
-initializers keyed to those enums, so the correspondence is checked by the
-compiler rather than by a comment.
-
-### Attribute plumbing
-
-- values are formatted and parsed with libiio's `iio_value_*` helpers (§12):
-  `scale` is `int.micro`, `gain`/`reference` are strings from the tables
-  (`iio_value_match_str`), the rest are integers. A value that does not fit is
-  `-ERANGE`, not a cut value.
-- `adc_channel_index` (`:188-200`) resolves a channel id to an index by `strcmp`
-  against `iio_adc_hal.channels[]`.
-- `iio_adc_read_attr` (`:377-447`) — `raw` and `process` call
-  `iio_adc_hal.read_raw()`; `process` scales by the user-written
-  `chan_state[].scale_val*`, so it does **not** depend on `ref_voltage_mv`.
-- `iio_adc_write_attr` (`:449-542`) — `raw` and `process` are read-only,
-  `-EPERM`. `gain` and `reference` push to hardware through the HAL hook before
-  storing (§8).
-- `adc_channel_format` (`:222-236`) computes each channel's format:
-
-  ```c
-  .length     = NO_OS_DIV_ROUND_UP(res, 8) * 8,
-  .bits       = res,
-  .is_signed  = differential,
-  .with_scale = true,
-  .scale      = vref_mv / (1 << (res - is_signed)),   /* one LSB in mV */
-  .is_be      = true,
-  ```
-
-  with `res = iio_adc_hal.resolution_bits` (validated 1..32 in `iio_adc_init`).
-  The 12-bit MAX32690 therefore publishes `be:u12/16`, the 16-bit demo
-  `be:u16/16`. The format is part of the context XML, so it reflects the
-  `differential` setting at context creation. After a client changes
-  `differential`, `iio_channel_refresh_format()` gets the new one
-  (`be:s16/16`), through `iio_adc_get_scan_format()` and the backend's
-  `refresh_format` op (§5); then the client opens its buffer.
-- `adc_regs[16]` (`:544-564`) backs `REG_READ`/`REG_WRITE` with plain RAM. It is a
-  scratchpad for protocol testing, not real register access.
+What the part has is the `noos_iio_enum`'s `mask` (§2): `Internal` (the 1.25 V
+bandgap), and `External0` when the board gives its voltage
+(`IIO_ADC_EXT_REF_VOLTAGE_MV`, so the scale can follow it). A name the part
+lacks is `-ENOTSUP`, an unknown one `-EINVAL`, and `reference_available` lists
+only what the part has. `MXC_ADC_REF_INT_2V048` exists in silicon but has no
+name in the namespace, so it is unreachable — an honest gap, not a reason to
+overload `External1`.
 
 ### The sample path
 
-`iio_adc_read_samples` (`:250-332`):
+`read_scan` converts the enabled inputs once each (`adc_demo` reads its table
+instead). `wait_scan` paces each scan with the timer trigger's wait. The
+table layer lays the scan out as `iio_device_get_sample_size()` describes.
 
-1. `sample_size = iio_device_get_sample_size(iio_dev, mask)`; `bytes` must be a
-   whole number of scans, else `-EINVAL`
-2. walk the channels in order, skipping any that is not a scan element or not
-   enabled in `mask`; for each kept channel record its HAL index, bits, storage
-   bytes and **offset, aligned to its own size** — the same layout
-   `iio_device_get_sample_size` describes, so host and board agree
-3. per scan: `iio_trigger_timer_wait()`, then one `read_raw` per enabled
-   channel, masked to `bits` (two's complement is kept for signed channels) and
-   stored big-endian at its offset
-
-Enabling only `voltage1` on the demo gives a 2-byte scan of channel 1 alone;
-enabling both gives `v0 v1 v0 v1 …`. `iio_adc_enable_buffer` (`:334-341`) stops
-the trigger on disable; the next stream's first wait restarts it.
+Enabling only `voltage1` on the demo gives a 2-byte scan of input 1 alone;
+enabling both gives `v0 v1 v0 v1 …`. Disabling the buffer calls `stop_scan`,
+which stops the trigger; the next stream's first wait restarts it.
 
 What it still does not do: per-channel chunked capture through the sequencer.
-Each value is one `read_raw`, which is what makes the timer pacing meaningful
+Each value is one conversion, which is what makes the timer pacing meaningful
 (§7a).
 
-## 7a. `drivers/iio_trigger_timer.c` — the sampling trigger
+## 7a. `trigger/iio_trigger_timer.c` — the sampling trigger
 
 Why it exists: without it `read_samples` converts back-to-back, as fast as the
 CPU allows, so the interval between samples depends on the ADC, the bus and the
@@ -314,14 +443,14 @@ trigger0: timer0
 		attr  0: sampling_frequency value: 1000
 ```
 
-and `iio-adc` reports `trigger0` as its trigger (`iio_info` shows it; over the
+and the ADC reports `trigger0` as its trigger (`iio_info` shows it; over the
 wire the responder's `GETTRIG` maps `noos_get_trigger`'s result to a device
 index).
 
 Mechanics. `iio_trigger_timer.c` holds the platform-independent part: ticks,
 wait, attribute. The hardware tick sits behind `iio_trigger_timer_hw.h`
 (`_hw_init`, `_hw_start(freq_hz, tick)`, `_hw_stop`).
-`drivers/iio_trigger_timer_no_os.c` implements it with no-OS's timer and IRQ
+`trigger/iio_trigger_timer_no_os.c` implements it with no-OS's timer and IRQ
 API and the `TRIGGER_*` wiring of `timers.h`, on every platform. Three
 optional `timers.h` defines cover a no-OS layer that differs from Maxim's
 (the aducm3029 one, §13):
@@ -330,7 +459,7 @@ optional `timers.h` defines cover a no-OS layer that differs from Maxim's
 - `TRIGGER_TIMER_MAX_TICKS`: a rate whose period does not fit the counter is
   refused rather than truncated.
 
-- `iio_trigger_timer_init` — called from `iio_adc_init` — runs `_hw_init`
+- `iio_trigger_timer_init` — called by the sample before `iio_adc_init` — runs `_hw_init`
   (no-OS: sets up the IRQ controller and fills in the `NO_OS_EVT_TIM_ELAPSED`
   callback). The ISR only does `ticks++`.
 - `iio_trigger_timer_wait` — returns at once when `sampling_frequency` is 0
@@ -390,67 +519,87 @@ The Maxim IRQ controller is a singleton, so the trigger and the USB tick share
 it and must use different timers. They also share one priority, so neither timer ISR
 preempts the other while it walks the callback list.
 
-## 8. `struct iio_adc_hal` and the part drivers
+## 7b. The standard channels: `iio_accel.h`, `iio_temp.h`, `iio_adc.h`
 
-`include/iio_adc_hal.h`:
+Header-only lists, one per device type, that fix that type's ABI as Linux's
+drivers of the type have it. Each macro takes the `NOOS_IIO_BIT()`s the part
+has, those of them with a list, and last the scan type (an initializer, as
+Linux's, or `NOOS_IIO_NO_SCAN_TYPE`), and places each attribute itself:
+
+| type | channels (priv) | the channel's own | shared |
+|---|---|---|---|
+| accel | `NOOS_IIO_ACCEL_CHANNEL(X/Y/Z, scan, ...)`, `NOOS_IIO_ACCEL_XYZ(...)`: `accel_x/y/z` (the axis, 0..2) | raw, calibbias, calibscale, ... | `NOOS_IIO_ACCEL_SHARED`: scale, sampling_frequency, the filter corners, oversampling_ratio, by type (`in_accel_scale`) |
+| temp | `NOOS_IIO_TEMP_CHANNEL(...)`: `temp`; `NOOS_IIO_TEMP_CHANNEL_N(n, ...)`: `tempN` (n) | everything: raw, input, scale, offset | none |
+| adc | `NOOS_IIO_VOLTAGE_CHANNEL(n, ...)`: `voltageN`; `NOOS_IIO_VOLTAGE_DIFF_CHANNEL(p, m, ...)`: `voltageP-voltageM` (n, p) | raw, scale, offset, calibbias, ... | `NOOS_IIO_ADC_SHARED`: sampling_frequency, oversampling_ratio, the device's (device attributes) |
+
+A bit the type does not share is the channel's own, so nothing a part
+names is dropped. A part that differs from its type (an ADC with one scale
+for all its inputs) writes that `noos_iio_chan` by hand.
+
+## 7c. Putting a part together
+
+`drivers/accel/adxl355/iio_adxl355.c` in no-OS, the whole IIO description
+of an ADXL355, ADXL357 or ADXL359:
 
 ```c
-struct iio_adc_hal {
-	const char *const *channels;
-	unsigned int       num_channels;
-	unsigned int       resolution_bits;
-	int                ref_voltage_mv;
-	int (*init)(void);
-	int (*read_raw)(unsigned int channel, int *value);
-	int (*set_gain)(unsigned int channel, unsigned int gain);
-	int (*set_reference)(unsigned int channel, unsigned int reference);
+static const struct noos_iio_chan adxl355_iio_channels[] = {
+	NOOS_IIO_ACCEL_XYZ(NOOS_IIO_BIT(RAW) | NOOS_IIO_BIT(CALIBBIAS) |
+			   NOOS_IIO_BIT(SCALE) | NOOS_IIO_BIT(SAMP_FREQ) |
+			   NOOS_IIO_BIT(HIGH_PASS_FILTER_3DB_FREQUENCY),
+			   NOOS_IIO_BIT(SAMP_FREQ) |
+			   NOOS_IIO_BIT(HIGH_PASS_FILTER_3DB_FREQUENCY),
+			   ADXL355_IIO_SCAN_TYPE),
+	NOOS_IIO_TEMP_CHANNEL(-1, NOOS_IIO_BIT(RAW) | NOOS_IIO_BIT(SCALE) |
+			      NOOS_IIO_BIT(OFFSET), 0, NOOS_IIO_NO_SCAN_TYPE),
 };
 
-extern const struct iio_adc_hal iio_adc_hal;
+/* the 357 and 359 differ in their scale and temperature offset */
+#define ADXL355_IIO_VALUES(_scale_nano, _temp_offset)			\
+	NOOS_IIO_CONST(ACCEL, SCALE, INT_PLUS_NANO, 0, _scale_nano),	\
+	NOOS_IIO_LIST(ACCEL, SAMP_FREQ, INT_PLUS_MICRO, adxl355_odr_table, \
+		      adxl355_iio_get_odr, adxl355_iio_set_odr),	\
+	NOOS_IIO_LIST_FN(ACCEL, HIGH_PASS_FILTER_3DB_FREQUENCY,		\
+			 INT_PLUS_MICRO, adxl355_iio_hpf_avail,		\
+			 adxl355_iio_get_hpf, adxl355_iio_set_hpf),	\
+	NOOS_IIO_CONST(TEMP, SCALE, INT_PLUS_MICRO, -110, 497238),	\
+	NOOS_IIO_CONST(TEMP, OFFSET, INT_PLUS_MICRO, _temp_offset, 250000)
 ```
 
-**Link-time switch.** The symbol is declared once and *defined* once per firmware
-image; CMake compiles exactly the one selected driver
-(`CMakeLists.txt:140-144`, driven by the `ADC` cache variable) and the linker
-resolves it. Consequence: one ADC per image, chosen at build time. No runtime
-registry, no indirection cost.
+plus a `read_raw` for `raw` (an axis or the temperature, by the channel's
+type) and `calibbias`, a `write_raw` for `calibbias`, `read_scan` (one
+reading of the axes) and `wait_scan` (its `DATA_RDY`). The high-pass
+corners follow the ODR, so their table is a function's (`LIST_FN`).
 
-`set_gain` and `set_reference` are **optional**. `iio_adc_write_attr` calls the
-hook only when it is non-NULL, and stores the new value only when the hook returns
-0 — hardware first, state second. A NULL hook means the value is accepted and stored as before, so drivers that do
-not implement it are unaffected.
+## 8. `common_api` and the MSDK
 
-A hook may reject values the silicon cannot produce. The attribute stays fully
-visible and enumerable, and the write fails
-honestly with `-ENOTSUP` instead of being silently accepted.
+`samples/iiod/adc/common_api/common_api.c` serves every MAX32 part with one
+file, because the MSDK's ADC API comes in two revisions that the per-die
+`adc.h` tells apart (`MAX_ADC_SLOT_NUM` defined or not, `common_api.h`):
 
-`read_raw` has to be a function pointer because the MSDK ADC API genuinely differs
-per part, despite both parts including a header called `adc.h`:
-
-- **max32690** (`drivers/adc/max32690/max32690.c`) — slot sequencer plus FIFO.
-  `MXC_ADC_Init(&cfg)` takes a config struct. Each read does
+- **revB** (max32690, max32662, max32672, max78002) — slot sequencer plus
+  FIFO. `MXC_ADC_Init(&cfg)` takes a config struct. Each conversion does
   `MXC_ADC_Clear_ChannelSelect` → `MXC_ADC_SlotConfiguration` →
   `MXC_ADC_Configuration` → `MXC_ADC_StartConversion()` → spin on
   `MXC_F_ADC_INTFL_SEQ_DONE` with a timeout → `MXC_ADC_DisableConversion` →
-  `MXC_ADC_GetData` (`drivers/adc/common_api/common_api.c`).
+  `MXC_ADC_GetData`.
   `MXC_ADC_GetData(int *)` copies **every** word in the FIFO, and back-to-back
   conversions leave more than one there: it gets a `MAX_ADC_FIFO_LEN` buffer
   and the first word is kept. Handing it a single `int` overwrote the caller's
-  stack — `iio_adc_read_samples`' channel table — and the second sample of
+  stack — the sample path's channel table — and the second sample of
   every stream failed with `-EINVAL`.
-  12-bit, 1250 mV internal reference. Implements `set_reference` via
-  `MXC_ADC_ReferenceSelect`: `IIO_ADC_REF_INTERNAL` → `MXC_ADC_REF_INT_1V25`,
-  `IIO_ADC_REF_EXTERNAL0` → `MXC_ADC_REF_EXT`, everything else `-ENOTSUP`.
-  `MXC_ADC_REF_INT_2V048` exists in silicon but has no name in the shared
-  enumeration, so it is currently unreachable — an honest gap, not a reason to
-  overload `External1`. No PGA, so `set_gain` stays NULL.
-- **max32655** (`drivers/adc/max32655/max32655.c`) — `MXC_ADC_Init()` takes no
-  argument and `MXC_ADC_StartConversion(channel)` *returns the sample*. 10-bit,
-  1220 mV.
-- **adc_demo** (`drivers/adc/adc_demo/adc_demo.c`) — `voltage0` + `voltage1`,
-  16-bit, walking a 32-entry `sine_lut` with a per-channel `lut_index` (`:13`,
-  `:25`, `:42-43`). Needs no hardware, and being the only two-channel driver it is
-  the build where the channel-mask interleave in §7 is directly observable.
+  12-bit, 1250 mV internal reference. `MXC_ADC_ReferenceSelect` switches
+  between `MXC_ADC_REF_INT_1V25` (`Internal`) and `MXC_ADC_REF_EXT`
+  (`External0`). No PGA.
+- **revA** (max32655, max32650, max32665, max32680, max78000) —
+  `MXC_ADC_Init()` takes no argument and `MXC_ADC_StartConversion(channel)`
+  *returns the sample*. 10-bit; the reference voltage comes from the board
+  (`IIO_ADC_REF_VOLTAGE_MV`, 1220 mV on the max32655), and cannot be
+  switched, so there is no `reference` attribute.
+
+The board's `platform.cmake` gives the part's include path and the defines
+(`IIO_ADC_NAME`, `IIO_ADC_CLOCK`, `IIO_ADC_REF_VOLTAGE_MV`,
+`IIO_ADC_EXT_REF_VOLTAGE_MV`, `IIO_ADC_NUM_CHANNELS`); adding a MAX board adds
+no ADC source file.
 
 **Ordering trap on the 690.** `MXC_ADC_Configuration()` calls
 `MXC_ADC_SlotsConfig(req)` and then `MXC_ADC_Clear_ChannelSelect()`
@@ -465,19 +614,16 @@ failure in any future multi-slot sequencer work.
 | gap | where | what solving it takes |
 |---|---|---|
 | synchronous enqueue; `nonblock` ignored | `backend.c:153-184` | a pending-block list filled by the trigger, with a completion flag `dequeue_block` waits on (`NO_THREADS`, §10) |
-| trigger pairing fixed at build time; `set_trigger` only accepts the fixed one | `backend.c:225-257` | triggers as a device class a buffer subscribes to |
+| trigger pairing fixed at build time; `set_trigger` only accepts the fixed one | `backend.c:225-257` | triggers as devices a buffer subscribes to |
 | `cancel_buffer` cannot abort | `backend.c:81-83` | unsubscribing the buffer from its trigger and waking pending blocks |
 
 Closed since the upstream reset (kept here so nobody re-opens them): channel
 mask stored and passed to `read_samples` (§5, §7); mask-filtered interleave of
-enabled channels (§7); per-channel computed format (§7); a real trigger device
-(§7a); `IIO_ADC_MAX_CHANNELS` checked against `num_channels` (§7).
+enabled channels (§7); a real trigger device (§7a).
 
 Specific to this port:
 
-- `iio_adc_hal` is a single link-time symbol and `chan_state[]` is file-scope, so
-  exactly one ADC instance is possible per image
-- `adc_regs[]` is RAM, not registers (§7)
+- the sample builds one ADC driver per image (`ADC=`)
 - upstream `iiod/responder.c` prints `int32_t` with `%u`, which warns under
   arm-none-eabi; left alone because files outside `no-OS/` track upstream
   exactly
@@ -605,7 +751,7 @@ client can tell an enqueue failure from a dequeue failure in one status word.
 
 ## 12. Value formatting
 
-Device classes format and parse their attributes with libiio's `iio_value_*`
+The table layer formats and parses the attributes with libiio's `iio_value_*`
 helpers, declared in `<iio/iio-backend.h>` next to `iio_snprintf()`:
 
 - `iio_value_format_int/str/fixed/list` write the value and return its length
@@ -735,7 +881,7 @@ Key variables:
 | `IIOD_TRANSPORT` | `uart` | `uart`, `usb` or `network` |
 | `NO_OS_PATH` | discovered | the no-OS checkout |
 | `NO_OS_FETCH`, `NO_OS_GIT_URL`, `NO_OS_GIT_TAG` | `OFF`, upstream, `main` | clone fallback |
-| `ADC` | `IIOD_PLATFORM_ADC` | `drivers/adc/<adc>/<adc>.c` |
+| `ADC` | `IIOD_PLATFORM_ADC` | `samples/iiod/adc/<adc>/<adc>.c` |
 | `PROBE` | `openocd` (preset) | no-OS flash tool; `jlink` also works |
 | `MAXIM_LIBRARIES` (env) | from no-OS's maxim toolchain | MSDK `Libraries/` dir |
 
@@ -796,7 +942,7 @@ tinyiiod, the responder, `backend.c` and `iiod/<transport>.c`. Its defines turn
 off every upstream backend (`WITH_LOCAL_BACKEND=0` and friends). They also set
 `WITH_LIBTINYIIOD=1`, `WITH_EXTERNAL_BACKEND=1` and `NO_THREADS=1`, and pin the
 version strings. They are PUBLIC, together with `include/` and `no-OS/include`,
-so the device classes linked next to it see the same `<iio/iio.h>`. The rest
+so the drivers linked next to it see the same `<iio/iio.h>`. The rest
 of libiio's headers stay private. It takes `no-os` as `$<COMPILE_ONLY:...>`:
 headers, defines and the forced `no_os_config.h`, but not the objects, which
 reach the link through the executable once. `CMakeLists.txt` here is one
