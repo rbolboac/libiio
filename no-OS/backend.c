@@ -7,6 +7,9 @@
 #include <iio/iio-backend.h>
 #include <iio-private.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <stdlib.h>
+#include <string.h>
 #include <no_os_print_log.h>
 #include <iio_device.h>
 
@@ -19,6 +22,12 @@ unsigned int noos_iio_device_count;
 
 /* Buffers open per registered device: no format may change under one. */
 static unsigned int noos_open_buffers[NOOS_IIO_MAX_DEVICES];
+
+/* The debug attribute a device with reg_read/reg_write gets, as on Linux. */
+#define NOOS_REG_ACCESS_ATTR "direct_reg_access"
+
+/* The register direct_reg_access reads, per registered device. */
+static uint32_t noos_reg_address[NOOS_IIO_MAX_DEVICES];
 
 struct iio_buffer_pdata {
 	const struct iio_device *dev;
@@ -221,12 +230,93 @@ int noos_iio_register_device(const struct noos_iio_device_info *info)
 	return 0;
 }
 
+static bool noos_is_reg_access(const struct iio_attr *attr)
+{
+	return attr->type == IIO_ATTR_TYPE_DEBUG &&
+	       !strcmp(iio_attr_get_name(attr), NOOS_REG_ACCESS_ATTR);
+}
+
+/* A read gives the register last written to direct_reg_access. */
+static ssize_t noos_reg_access_read(struct noos_iio_device_info *info,
+				    char *dst, size_t len)
+{
+	uint32_t value;
+	int ret;
+
+	if (!info->reg_read)
+		return -EPERM;
+
+	ret = info->reg_read(info->dev, noos_reg_address[info - noos_iio_devices],
+			     &value);
+	if (ret)
+		return ret;
+
+	ret = snprintf(dst, len, "0x%" PRIX32, value);
+	if (ret < 0 || (size_t)ret >= len)
+		return -ENOMEM;
+
+	/* With the '\0', as the other attributes' lengths are. */
+	return ret + 1;
+}
+
+/* "<reg>" selects the register a read gives, "<reg> <value>" writes it, as
+ * Linux's iio_debugfs_write_reg(); each in any base strtoul takes. */
+static ssize_t noos_reg_access_write(struct noos_iio_device_info *info,
+				     const char *src, size_t len)
+{
+	unsigned long address, value;
+	char buf[32], *end;
+	int ret;
+
+	if (len >= sizeof(buf))
+		return -EINVAL;
+
+	memcpy(buf, src, len);
+	buf[len] = '\0';
+
+	address = strtoul(buf, &end, 0);
+	if (end == buf || address > UINT32_MAX)
+		return -EINVAL;
+
+	src = end;
+	value = strtoul(src, &end, 0);
+	if (end == src) {
+		/* No value: only select the register. */
+		while (*end == ' ' || *end == '\n')
+			end++;
+		if (*end)
+			return -EINVAL;
+
+		noos_reg_address[info - noos_iio_devices] = address;
+		return (ssize_t)len;
+	}
+
+	while (*end == ' ' || *end == '\n')
+		end++;
+	if (*end || value > UINT32_MAX)
+		return -EINVAL;
+
+	if (!info->reg_write)
+		return -EPERM;
+
+	noos_reg_address[info - noos_iio_devices] = address;
+
+	ret = info->reg_write(info->dev, address, value);
+	if (ret)
+		return ret;
+
+	return (ssize_t)len;
+}
+
 static ssize_t
 noos_read_attr(const struct iio_attr *attr, char *dst, size_t len)
 {
 	const struct iio_device *iio_dev = iio_attr_get_device(attr);
 	struct noos_iio_device_info *info =
 		(struct noos_iio_device_info *)iio_device_get_pdata(iio_dev);
+
+	if (info && noos_is_reg_access(attr))
+		return noos_reg_access_read(info, dst, len);
 
 	if (!info || !info->read_attr)
 		return -ENOSYS;
@@ -240,6 +330,9 @@ noos_write_attr(const struct iio_attr *attr, const char *src, size_t len)
 	const struct iio_device *iio_dev = iio_attr_get_device(attr);
 	struct noos_iio_device_info *info =
 		(struct noos_iio_device_info *)iio_device_get_pdata(iio_dev);
+
+	if (info && noos_is_reg_access(attr))
+		return noos_reg_access_write(info, src, len);
 
 	if (!info || !info->write_attr)
 		return -ENOSYS;
@@ -387,6 +480,15 @@ noos_create_context(const struct iio_context_params *params, const char *args)
 			if (ret)
 				pr_err("%s: add_channels failed: %d\n",
 				       info->name, ret);
+		}
+
+		if (info->reg_read || info->reg_write) {
+			noos_reg_address[i] = 0;
+			ret = iio_device_add_attr(iio_dev, NOOS_REG_ACCESS_ATTR,
+						  IIO_ATTR_TYPE_DEBUG);
+			if (ret)
+				pr_err("%s: %s failed: %d\n", info->name,
+				       NOOS_REG_ACCESS_ATTR, ret);
 		}
 
 		if (iio_device_get_channels_count(iio_dev) > 0) {

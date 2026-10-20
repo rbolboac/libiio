@@ -297,7 +297,7 @@ Still not carried: events.
 | op | function | behaviour | gap |
 |---|---|---|---|
 | `create` | `:267` | see §3 | — |
-| `read_attr` | `:199` | dispatch to `info->read_attr` | — |
+| `read_attr` | `:199` | dispatch to `info->read_attr`, except `direct_reg_access` (below) | — |
 | `write_attr` | `:212` | same shape | — |
 | `get_trigger` | `:225` | `iio_context_find_device(ctx, info->trigger)`, `-ENODEV` when the device names none | `set_trigger` (`:247`) accepts only the trigger `get_trigger` returns (`-EINVAL` otherwise): the pairing is fixed at build time |
 | `open_buffer` | `:34` | allocates `struct iio_buffer_pdata { dev; mask; enabled; }` and **stores the mask** (§6) | — |
@@ -309,6 +309,7 @@ Still not carried: events.
 | `enqueue_block` | `:153` | **performs the whole transfer inline**, with the mask, and stashes the result in `pdata->error` | not async |
 | `dequeue_block` | `:181` | `return pdata->error;` | ignores `nonblock`, no `-EBUSY`, no double-op detection |
 | `reg_read` / `reg_write` | `:242` / `:254` | `-ENOSYS` when the device hook is NULL | — |
+| (debug attribute) | `noos_reg_access_read` / `_write` | a device with `reg_read` or `reg_write` gets the debug attribute `direct_reg_access`, as on Linux, so `iio_info` lists it and v0 clients (which have no register opcodes) reach the registers: writing `"<reg>"` selects a register, `"<reg> <value>"` writes it, a read gives the selected one as `0x%X`. The selection is per device and shared by clients, so a v1 client's atomic `reg_read` is preferred (`iio_device_reg_read` tries it first) | — |
 | `refresh_format` | `noos_refresh_format` | the device's `get_scan_format` for a scan element, keeping the cached `scale`/`offset` as the client backends do; a device without the hook succeeds unchanged; `-EBUSY` while a buffer of the device is open, because queued blocks used the old layout | — |
 
 Ordering worth knowing: `iio_stream` (and so `iio_rwdev`) enqueues its blocks
